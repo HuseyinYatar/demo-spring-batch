@@ -1,0 +1,151 @@
+{
+  "id": null,
+  "uid": "batchdemo-executions",
+  "title": "Batch Job & Step Executions",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total Job Executions",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT count(*) AS \"Total\" FROM batch_job_execution;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Completed",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT count(*) AS \"Completed\" FROM batch_job_execution WHERE status = 'COMPLETED';",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Failed",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT count(*) AS \"Failed\" FROM batch_job_execution WHERE status = 'FAILED';",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Job Executions",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT e.job_execution_id AS \"Execution ID\", i.job_name AS \"Job\", e.status AS \"Status\", e.start_time AS \"Start Time\", e.end_time AS \"End Time\", round(extract(epoch FROM (e.end_time - e.start_time))::numeric, 2) AS \"Duration (s)\", e.exit_code AS \"Exit Code\" FROM batch_job_execution e JOIN batch_job_instance i ON i.job_instance_id = e.job_instance_id ORDER BY e.start_time DESC;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Execution ID", "desc": true }]
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Step Executions",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT s.step_execution_id AS \"Step Exec ID\", s.job_execution_id AS \"Job Exec ID\", s.step_name AS \"Step\", s.status AS \"Status\", s.read_count AS \"Read\", s.write_count AS \"Write\", s.commit_count AS \"Commits\", (s.read_skip_count + s.write_skip_count + s.process_skip_count) AS \"Skips\", s.rollback_count AS \"Rollbacks\", s.start_time AS \"Start Time\", s.end_time AS \"End Time\" FROM batch_step_execution s ORDER BY s.step_execution_id DESC;",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Step Exec ID", "desc": true }]
+      }
+    }
+  ]
+}
