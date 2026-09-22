@@ -28,6 +28,11 @@ docker compose up -d
 
 # Run a single test method
 ./mvnw.cmd test -Dtest=DefaultOrderLineValidatorTest#rejectsANegativeQuantity
+
+# Regenerate src/main/resources/data/order-line-items.csv (100k rows: most
+# orders get 1 line item, some 2-3; 14 rows deliberately invalid to exercise
+# the skip-and-log path - see generate.py)
+python generate.py
 ```
 
 There is no separate lint step; Lombok annotation processing runs as part of `compile`/`testCompile` in the `maven-compiler-plugin` execution in `pom.xml`.
@@ -39,6 +44,11 @@ There is no separate lint step; Lombok annotation processing runs as part of `co
 ```bash
 curl -X POST http://localhost:8080/api/batch/jobs/order-processing
 curl http://localhost:8080/api/batch/jobs/executions/{id}
+
+# Operational control (JobOperator - see Architecture below)
+curl -X POST http://localhost:8080/api/batch/jobs/executions/{id}/stop
+curl -X POST http://localhost:8080/api/batch/jobs/executions/{id}/restart
+curl -X POST http://localhost:8080/api/batch/jobs/executions/{id}/abandon
 ```
 
 `spring.batch.job.enabled=false` is set, so the job does **not** run automatically on startup — it must be triggered via the REST endpoint above.
@@ -105,6 +115,14 @@ A `@Bean @StepScope` method that returns the `ItemReader<T>` interface type caus
 `buildInvoicesStep` also demonstrates `.faultTolerant().retry(...)` — a genuinely transient exception (a dropped DB connection, a lock timeout) would never actually fire against a healthy local Postgres, so `FlakyOrderPersistenceSimulator` (`batch/step2/`) throws `TransientInvoiceWriteException` exactly once per job run, from the top of `OrderPersistenceItemWriter.write(...)`, before anything in the chunk touches the DB. The chunk transaction rolls back cleanly (nothing partially written), Spring Batch retries the same chunk — re-running `InvoiceAggregationProcessor.process(...)` for its buffered items too, which is safe because that processor already re-checks `existsByOrderNumber` — and the retry succeeds because the simulator's flag is now tripped. `perRunStateResetListener` (in `BatchJobConfig`, the same `beforeJob` listener that resets the rejects file) re-arms it every run via `flakySimulator.reset()`, so every run shows exactly one retry, deterministically. `InvoiceWriteRetryListener` logs a `WARN` on each retry attempt so it's visible in the console. Toggle off with `batch.simulate-transient-write-failures=false`; retry count via `batch.retry-limit` (default 3).
 
 `TransientInvoiceWriteException` is *also* registered as skippable (`.skip(TransientInvoiceWriteException.class).skipLimit(properties.getSkipLimit())`, reusing the same `batch.skip-limit` step 1 uses), so the two policies compose the way Spring Batch intends: retry first, and only if `retryLimit` attempts are all exhausted does Spring Batch scan the chunk item-by-item and skip the one offending item instead of failing the whole step/job. In the current deterministic simulation this path never actually triggers (the simulator always succeeds by the 2nd attempt), but it's there so a *genuinely* persistent transient failure degrades gracefully instead of failing the job outright. Note: unlike step 1, no `SkipListener` is registered here, so a skip on this path is currently silent (no audit trail) — `readCount`/`writeCount`/`skipCount` on the `buildInvoicesStep` `StepExecution` would still reflect it, just nothing gets written to a file.
+
+### Operational control via JobOperator (stop / restart / abandon)
+
+`launch()` in `BatchJobController` only ever starts a brand-new execution (fresh random `runId` `JobParameters` every call), so it can't be used to resume a stopped or failed run. `org.springframework.batch.core.launch.JobOperator` (package `core.launch`, confirmed via `javap`) fills that gap and is **already an available bean with zero extra config** — it's provided by `DefaultBatchConfiguration`, the machinery backing `@EnableBatchProcessing`, which `BatchJobConfig` already declares. `restart(executionId)` looks up the *original* failed/stopped execution's own `JobParameters` internally, which is why restart works correctly despite `launch()` always minting new ones — no parameter bookkeeping needed on the caller's side. `orderProcessingJob` never calls `.preventRestart()`, so it's restartable by default.
+
+`JobControlService` (`batch/control/`) wraps `JobOperator` + `JobExplorer` behind three methods (`stop`, `restart`, `abandon`), each returning the existing `JobExecutionStatusResponse` DTO — re-fetching via `JobExplorer` after `stop`/`restart` since those return only a `boolean`/new execution id, not the execution itself (`abandon` returns the `JobExecution` directly). `BatchJobController`'s three new endpoints stay pure delegates, matching the existing thin-controller pattern. `BatchOperationExceptionHandler` (`web/`, `@RestControllerAdvice`) maps `JobOperator`'s checked exceptions to HTTP status codes instead of letting them fall through to a raw 500: `NoSuchJobExecutionException`/`NoSuchJobException` → 404, `JobExecutionAlreadyRunningException`/`JobExecutionNotRunningException`/`JobInstanceAlreadyCompleteException`/`JobRestartException`/`InvalidJobParametersException` → 409. Kept as a separate class (rather than local `@ExceptionHandler` methods on the controller) so the controller doesn't have to know about Batch's exception hierarchy at all.
+
+If a restart ends up re-running `ingestLineItemsStep` mid-flight (rather than just resuming the already-completed `buildInvoicesStep`), the same staging-table dedup gap noted below under Idempotency applies — worth knowing before relying on restart against a step-1 failure specifically.
 
 ### Idempotency (re-triggering the job)
 
