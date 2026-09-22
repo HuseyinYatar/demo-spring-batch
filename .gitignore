@@ -34,4 +34,5 @@ build/
 
 
 ### Csv ###
-*.csv
+invoice-summary.csv
+rejected-rows.csv

@@ -1,7 +1,0 @@
-stage,reason,timestamp,rawContent
-"PROCESS","quantity must be a positive number","2026-09-22T07:31:08.876134900Z","OrderLineCsvRecord(orderId=ORD-1008, customerId=C008, customerName=Alia Khan, productId=P012, productName=Keyboard, quantity=-2, unitPrice=1200.00, orderDate=2026-01-06)"
-"READ","Parsing error at line: 11 in resource=[class path resource [data/order-line-items.csv]], input=[ORD-1006,C006,Neha Rao,P010,Webcam,2,abc,2026-01-05]","2026-09-22T07:31:08.877146100Z","ORD-1006,C006,Neha Rao,P010,Webcam,2,abc,2026-01-05"
-"READ","Parsing error at line: 12 in resource=[class path resource [data/order-line-items.csv]], input=[ORD-1007,C007,Ravi Shah,P011,Mouse,1,499.00]","2026-09-22T07:31:08.878144200Z","ORD-1007,C007,Ravi Shah,P011,Mouse,1,499.00"
-"PROCESS","unitPrice must be a positive number","2026-09-22T07:31:08.902923Z","OrderLineCsvRecord(orderId=ORD-1009, customerId=C009, customerName=Divya Iyer, productId=P013, productName=Monitor, quantity=1, unitPrice=-500.00, orderDate=2026-01-06)"
-"PROCESS","customerName must not be blank","2026-09-22T07:31:08.904846300Z","OrderLineCsvRecord(orderId=ORD-1010, customerId=C010, customerName=, productId=P014, productName=Speaker, quantity=3, unitPrice=250.00, orderDate=2026-01-07)"
-"PROCESS","orderId must not be blank","2026-09-22T07:31:08.906448700Z","OrderLineCsvRecord(orderId=, customerId=C011, customerName=Farhan Ali, productId=P015, productName=Charger, quantity=2, unitPrice=150.00, orderDate=2026-01-07)"
