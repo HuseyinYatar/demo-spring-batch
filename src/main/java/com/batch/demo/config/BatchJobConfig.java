@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.batch.demo.batch.reject.RejectedRecordSink;
+import com.batch.demo.batch.step2.FlakyOrderPersistenceSimulator;
 
 /**
  * {@code @EnableBatchProcessing} + {@link EnableJdbcJobRepository} together back the
@@ -28,11 +29,13 @@ import com.batch.demo.batch.reject.RejectedRecordSink;
 public class BatchJobConfig {
 
     @Bean
-    public JobExecutionListener rejectsFileResetListener(RejectedRecordSink rejectedRecordSink) {
+    public JobExecutionListener perRunStateResetListener(RejectedRecordSink rejectedRecordSink,
+                                                           FlakyOrderPersistenceSimulator flakySimulator) {
         return new JobExecutionListener() {
             @Override
             public void beforeJob(JobExecution jobExecution) {
                 rejectedRecordSink.reset();
+                flakySimulator.reset();
             }
         };
     }
@@ -41,9 +44,9 @@ public class BatchJobConfig {
     public Job orderProcessingJob(JobRepository jobRepository,
                                    Step ingestLineItemsStep,
                                    Step buildInvoicesStep,
-                                   JobExecutionListener rejectsFileResetListener) {
+                                   JobExecutionListener perRunStateResetListener) {
         return new JobBuilder("orderProcessingJob", jobRepository)
-                .listener(rejectsFileResetListener)
+                .listener(perRunStateResetListener)
                 .start(ingestLineItemsStep)
                 .next(buildInvoicesStep)
                 .build();
