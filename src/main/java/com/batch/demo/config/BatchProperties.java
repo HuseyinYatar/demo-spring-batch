@@ -18,4 +18,6 @@ public class BatchProperties {
     private BigDecimal taxRate = new BigDecimal("0.18");
     private int chunkSize = 5;
     private int skipLimit = 20;
+    private int retryLimit = 3;
+    private boolean simulateTransientWriteFailures = true;
 }

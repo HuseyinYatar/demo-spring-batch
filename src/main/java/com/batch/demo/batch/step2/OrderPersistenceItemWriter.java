@@ -17,9 +17,12 @@ import lombok.RequiredArgsConstructor;
 public class OrderPersistenceItemWriter implements ItemWriter<OrderInvoiceResult> {
 
     private final OrderRepository orderRepository;
+    private final FlakyOrderPersistenceSimulator flakySimulator;
 
     @Override
     public void write(Chunk<? extends OrderInvoiceResult> chunk) {
+        flakySimulator.maybeFailOnce();
+
         List<Order> orders = chunk.getItems().stream()
                 .map(OrderInvoiceResult::order)
                 .toList();

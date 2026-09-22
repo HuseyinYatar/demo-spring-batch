@@ -19,8 +19,10 @@ import org.springframework.transaction.PlatformTransactionManager;
 import com.batch.demo.batch.dto.OrderInvoiceResult;
 import com.batch.demo.batch.step2.DistinctOrderIdItemReader;
 import com.batch.demo.batch.step2.InvoiceSummaryFieldExtractor;
+import com.batch.demo.batch.step2.InvoiceWriteRetryListener;
 import com.batch.demo.batch.step2.OrderPersistenceItemWriter;
 import com.batch.demo.batch.step2.StagingMarkProcessedItemWriter;
+import com.batch.demo.batch.step2.TransientInvoiceWriteException;
 import com.batch.demo.repository.OrderLineItemStagingRepository;
 
 @Configuration
@@ -64,12 +66,19 @@ public class BuildInvoicesStepConfig {
                                    BatchProperties properties,
                                    DistinctOrderIdItemReader distinctOrderIdItemReader,
                                    ItemProcessor<String, OrderInvoiceResult> invoiceAggregationProcessor,
-                                   ItemWriter<OrderInvoiceResult> invoiceCompositeItemWriter) {
+                                   ItemWriter<OrderInvoiceResult> invoiceCompositeItemWriter,
+                                   InvoiceWriteRetryListener invoiceWriteRetryListener) {
         return new StepBuilder("buildInvoicesStep", jobRepository)
                 .<String, OrderInvoiceResult>chunk(properties.getChunkSize(), transactionManager)
                 .reader(distinctOrderIdItemReader)
                 .processor(invoiceAggregationProcessor)
                 .writer(invoiceCompositeItemWriter)
+                .faultTolerant()
+                .retry(TransientInvoiceWriteException.class)
+                .retryLimit(properties.getRetryLimit())
+                .skip(TransientInvoiceWriteException.class)
+                .skipLimit(properties.getSkipLimit())
+                .listener(invoiceWriteRetryListener)
                 .build();
     }
 }
