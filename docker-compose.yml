@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: batchdemo
+      POSTGRES_USER: batchdemo
+      POSTGRES_PASSWORD: batchdemo
+    ports:
+      - "5432:5432"
+    volumes:
+      - batchdemo-pgdata:/var/lib/postgresql/data
+
+volumes:
+  batchdemo-pgdata:
