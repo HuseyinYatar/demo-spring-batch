@@ -8,10 +8,13 @@ import org.springframework.batch.core.job.parameters.InvalidJobParametersExcepti
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
 import org.springframework.batch.core.repository.explore.JobExplorer;
-import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.launch.JobExecutionAlreadyRunningException;
+import org.springframework.batch.core.launch.JobExecutionNotRunningException;
 import org.springframework.batch.core.launch.JobInstanceAlreadyCompleteException;
+import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.launch.JobRestartException;
+import org.springframework.batch.core.launch.NoSuchJobException;
+import org.springframework.batch.core.launch.NoSuchJobExecutionException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,14 +22,16 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.batch.demo.batch.control.JobControlService;
 import com.batch.demo.web.dto.JobExecutionStatusResponse;
 import com.batch.demo.web.dto.JobLaunchResponse;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * Deliberately thin: only launches the already-assembled {@link Job} bean and reports
- * status. No job-building logic lives here (single responsibility).
+ * Deliberately thin: only launches the already-assembled {@link Job} bean, reports
+ * status, and delegates stop/restart/abandon to {@link JobControlService}. No
+ * job-building or exception-translation logic lives here (single responsibility).
  */
 @RestController
 @RequestMapping("/api/batch/jobs")
@@ -36,6 +41,7 @@ public class BatchJobController {
     private final JobLauncher jobLauncher;
     private final Job orderProcessingJob;
     private final JobExplorer jobExplorer;
+    private final JobControlService jobControlService;
 
     @PostMapping("/order-processing")
     public ResponseEntity<JobLaunchResponse> launch()
@@ -61,5 +67,24 @@ public class BatchJobController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(JobExecutionStatusResponse.from(execution));
+    }
+
+    @PostMapping("/executions/{id}/stop")
+    public ResponseEntity<JobExecutionStatusResponse> stop(@PathVariable long id)
+            throws NoSuchJobExecutionException, JobExecutionNotRunningException {
+        return ResponseEntity.ok(jobControlService.stop(id));
+    }
+
+    @PostMapping("/executions/{id}/restart")
+    public ResponseEntity<JobExecutionStatusResponse> restart(@PathVariable long id)
+            throws JobInstanceAlreadyCompleteException, NoSuchJobExecutionException,
+            NoSuchJobException, JobRestartException, InvalidJobParametersException {
+        return ResponseEntity.ok(jobControlService.restart(id));
+    }
+
+    @PostMapping("/executions/{id}/abandon")
+    public ResponseEntity<JobExecutionStatusResponse> abandon(@PathVariable long id)
+            throws NoSuchJobExecutionException, JobExecutionAlreadyRunningException {
+        return ResponseEntity.ok(jobControlService.abandon(id));
     }
 }
