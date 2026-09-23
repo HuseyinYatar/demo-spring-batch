@@ -87,7 +87,7 @@ flowchart TD
 Both processing steps are **partitioned**: the input is split into disjoint ranges up front (line ranges for the CSV, sorted order-id ranges for the staging table) so each partition gets its own reader/writer instance and runs fully in parallel — no shared mutable state, no synchronization needed. Partition count is configurable via `batch.partition-grid-size` (default 6) and controls both the number of partitions and the worker thread pool size.
 
 - **`ingestLineItemsStep`** — reads the CSV, validates each row against a set of pluggable business rules, writes valid rows to a staging table. Skip policies handle both parse failures and validation failures independently, with every rejected row logged (stage, reason, timestamp, raw content) to `rejected-rows.csv`.
-- **`buildInvoicesStep`** — reads distinct unprocessed order ids from staging, aggregates their line items into an `Order`/`Invoice`, and writes the result to three places in one transaction: the database, a per-partition CSV summary, and back to staging (marking it processed). A simulated transient failure demonstrates the retry policy — the chunk rolls back cleanly and retries, with a fallback to skip if retries are ever exhausted.
+- **`buildInvoicesStep`** — reads distinct unprocessed order ids from staging, aggregates their line items into an `Order`/`Invoice`, and writes the result to three places in one transaction: the database, a per-partition CSV summary, and back to staging (marking it processed). A simulated transient failure demonstrates the retry policy — the chunk rolls back cleanly and retries, with a fallback to skip if retries are ever exhausted. `DistinctOrderIdItemReader` fetches order ids page-by-page via keyset pagination (`orderId > lastSeenId`, capped by `batch.order-id-page-size`) rather than loading a partition's entire id range into memory at once.
 - **`mergeInvoiceSummaryStep`** — recombines the per-partition invoice-summary files into the single `invoice-summary.csv`, then removes the partition files.
 
 ### Fault tolerance
@@ -129,6 +129,7 @@ All under the `batch.*` prefix (`application.properties`):
 | `batch.retry-limit` | `3` | Max retry attempts on transient write failure |
 | `batch.simulate-transient-write-failures` | `true` | Toggle the retry-policy demo |
 | `batch.partition-grid-size` | `6` | Partitions (and worker threads) per step |
+| `batch.order-id-page-size` | `500` | Max order ids fetched per keyset page in step 2's reader |
 
 ## Observability
 
