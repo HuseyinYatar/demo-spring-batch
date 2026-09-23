@@ -121,6 +121,54 @@
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
       "options": {}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Partition Thread Pool (batchTaskExecutor)",
+      "description": "Active vs. idle threads in the pool that runs ingestLineItemsStep/buildInvoicesStep's partitions. Active should peak at batch.partition-grid-size during a run.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+          "expr": "executor_active_threads{name=\"batchTaskExecutor\"}",
+          "legendFormat": "active",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+          "expr": "executor_pool_size_threads{name=\"batchTaskExecutor\"}",
+          "legendFormat": "pool size",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+          "expr": "executor_pool_max_threads{name=\"batchTaskExecutor\"}",
+          "legendFormat": "max configured",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Partition Pool Queued Tasks",
+      "description": "Chunks waiting for a free partition thread. Should stay near zero once partitionGridSize matches the actual parallel workload.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+          "expr": "executor_queued_tasks{name=\"batchTaskExecutor\"}",
+          "legendFormat": "queued",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {}
     }
   ]
 }
