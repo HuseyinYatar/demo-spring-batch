@@ -20,4 +20,5 @@ public class BatchProperties {
     private int skipLimit = 20;
     private int retryLimit = 3;
     private boolean simulateTransientWriteFailures = true;
+    private int partitionGridSize = 6;
 }

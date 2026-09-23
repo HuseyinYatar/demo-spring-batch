@@ -1,5 +1,10 @@
 package com.batch.demo.config;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.EnableJdbcJobRepository;
 import org.springframework.batch.core.job.Job;
@@ -10,9 +15,12 @@ import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import com.batch.demo.batch.reject.RejectedRecordSink;
 import com.batch.demo.batch.step2.FlakyOrderPersistenceSimulator;
+import com.batch.demo.batch.step2.InvoiceSummaryPartitionPaths;
 
 /**
  * {@code @EnableBatchProcessing} + {@link EnableJdbcJobRepository} together back the
@@ -29,13 +37,34 @@ import com.batch.demo.batch.step2.FlakyOrderPersistenceSimulator;
 public class BatchJobConfig {
 
     @Bean
+    public TaskExecutor batchTaskExecutor(BatchProperties properties) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(properties.getPartitionGridSize());
+        executor.setMaxPoolSize(properties.getPartitionGridSize());
+        executor.setThreadNamePrefix("batch-partition-");
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean
     public JobExecutionListener perRunStateResetListener(RejectedRecordSink rejectedRecordSink,
-                                                           FlakyOrderPersistenceSimulator flakySimulator) {
+                                                           FlakyOrderPersistenceSimulator flakySimulator,
+                                                           BatchProperties properties) {
         return new JobExecutionListener() {
             @Override
             public void beforeJob(JobExecution jobExecution) {
                 rejectedRecordSink.reset();
                 flakySimulator.reset();
+                // Stale partition files from a previous run (especially one with a
+                // different batch.partition-grid-size) must not be picked up by this
+                // run's mergeInvoiceSummaryStep alongside the fresh ones.
+                for (Path partitionFile : InvoiceSummaryPartitionPaths.listPartitionFiles(properties.getInvoiceSummaryOutputPath())) {
+                    try {
+                        Files.deleteIfExists(partitionFile);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException("Unable to delete stale partition file " + partitionFile, e);
+                    }
+                }
             }
         };
     }
@@ -44,11 +73,13 @@ public class BatchJobConfig {
     public Job orderProcessingJob(JobRepository jobRepository,
                                    Step ingestLineItemsStep,
                                    Step buildInvoicesStep,
+                                   Step mergeInvoiceSummaryStep,
                                    JobExecutionListener perRunStateResetListener) {
         return new JobBuilder("orderProcessingJob", jobRepository)
                 .listener(perRunStateResetListener)
                 .start(ingestLineItemsStep)
                 .next(buildInvoicesStep)
+                .next(mergeInvoiceSummaryStep)
                 .build();
     }
 }
