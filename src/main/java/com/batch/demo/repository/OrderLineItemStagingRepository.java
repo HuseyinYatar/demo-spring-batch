@@ -12,5 +12,9 @@ public interface OrderLineItemStagingRepository extends JpaRepository<OrderLineI
     @Query("select distinct s.orderId from OrderLineItemStaging s where s.processed = false order by s.orderId")
     List<String> findDistinctUnprocessedOrderIds();
 
+    @Query("select distinct s.orderId from OrderLineItemStaging s where s.processed = false "
+            + "and s.orderId between :fromOrderId and :toOrderId order by s.orderId")
+    List<String> findDistinctUnprocessedOrderIdsBetween(String fromOrderId, String toOrderId);
+
     List<OrderLineItemStaging> findByOrderIdAndProcessedFalse(String orderId);
 }
