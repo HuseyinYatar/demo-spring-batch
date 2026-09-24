@@ -31,4 +31,6 @@ public interface OrderLineItemStagingRepository extends JpaRepository<OrderLineI
             Pageable pageable);
 
     List<OrderLineItemStaging> findByOrderIdAndProcessedFalse(String orderId);
+
+    boolean existsByOrderIdAndProductId(String orderId, String productId);
 }
