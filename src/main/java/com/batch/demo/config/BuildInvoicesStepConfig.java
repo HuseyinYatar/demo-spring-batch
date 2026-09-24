@@ -37,9 +37,10 @@ public class BuildInvoicesStepConfig {
     @StepScope
     public DistinctOrderIdItemReader distinctOrderIdItemReader(
             OrderLineItemStagingRepository stagingRepository,
+            BatchProperties properties,
             @Value("#{stepExecutionContext['fromOrderId']}") String fromOrderId,
             @Value("#{stepExecutionContext['toOrderId']}") String toOrderId) {
-        return new DistinctOrderIdItemReader(stagingRepository, fromOrderId, toOrderId);
+        return new DistinctOrderIdItemReader(stagingRepository, fromOrderId, toOrderId, properties.getOrderIdPageSize());
     }
 
     /**
