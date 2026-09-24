@@ -18,10 +18,13 @@ import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import org.hibernate.exception.JDBCConnectionException;
+
 import jakarta.persistence.EntityManagerFactory;
 
 import com.batch.demo.batch.dto.OrderLineCsvRecord;
 import com.batch.demo.batch.listener.RejectedRecordSkipListener;
+import com.batch.demo.batch.step1.IngestRetryListener;
 import com.batch.demo.batch.step1.LineRangePartitioner;
 import com.batch.demo.batch.step1.OrderLineFieldSetMapper;
 import com.batch.demo.batch.step1.OrderLineItemValidationProcessor;
@@ -71,7 +74,8 @@ public class IngestLineItemsStepConfig {
                                            FlatFileItemReader<OrderLineCsvRecord> orderLineItemReader,
                                            ItemProcessor<OrderLineCsvRecord, OrderLineItemStaging> orderLineItemValidationProcessor,
                                            ItemWriter<OrderLineItemStaging> orderLineItemStagingWriter,
-                                           RejectedRecordSkipListener rejectedRecordSkipListener) {
+                                           RejectedRecordSkipListener rejectedRecordSkipListener,
+                                           IngestRetryListener ingestRetryListener) {
         return new StepBuilder("ingestLineItemsWorkerStep", jobRepository)
                 .<OrderLineCsvRecord, OrderLineItemStaging>chunk(properties.getChunkSize(), transactionManager)
                 .reader(orderLineItemReader)
@@ -82,6 +86,22 @@ public class IngestLineItemsStepConfig {
                 .skip(InvalidOrderLineException.class)
                 .skipLimit(properties.getSkipLimit())
                 .listener(rejectedRecordSkipListener)
+                // Real DB connection failures are retried, never skipped - same
+                // reasoning as buildInvoicesStep: silently skipping a row because the
+                // DB blipped would drop it with no audit trail, unlike the
+                // FlatFileParseException/InvalidOrderLineException skips above, which
+                // do have one via RejectedRecordSkipListener. Registered as Hibernate's
+                // own JDBCConnectionException, not a Spring DataAccessException
+                // subtype: orderLineItemStagingWriter is a plain JpaItemWriter using
+                // EntityManager.persist() directly, which - unlike a Spring Data
+                // repository call such as OrderPersistenceItemWriter's
+                // orderRepository.saveAll() - never goes through Spring's persistence
+                // exception translation, so the raw Hibernate exception is what
+                // actually propagates here (confirmed via a real thrown-exception
+                // stack trace, not assumed).
+                .retry(JDBCConnectionException.class)
+                .retryLimit(properties.getRetryLimit())
+                .listener(ingestRetryListener)
                 .build();
     }
 
