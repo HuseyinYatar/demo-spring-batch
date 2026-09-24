@@ -16,6 +16,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.batch.demo.batch.dto.OrderInvoiceResult;
@@ -99,9 +101,12 @@ public class BuildInvoicesStepConfig {
                 .writer(invoiceCompositeItemWriter)
                 .faultTolerant()
                 .retry(TransientInvoiceWriteException.class)
+                // Real DB failures get the same retry treatment as the simulated one -
+                // see IngestLineItemsStepConfig for why neither is registered as
+                // skippable.
+                .retry(TransientDataAccessException.class)
+                .retry(DataAccessResourceFailureException.class)
                 .retryLimit(properties.getRetryLimit())
-                .skip(TransientInvoiceWriteException.class)
-                .skipLimit(properties.getSkipLimit())
                 .listener(invoiceWriteRetryListener)
                 .build();
     }
