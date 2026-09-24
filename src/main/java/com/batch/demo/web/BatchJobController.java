@@ -1,6 +1,6 @@
 package com.batch.demo.web;
 
-import java.util.UUID;
+import java.time.LocalDate;
 
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.batch.demo.batch.control.JobControlService;
+import com.batch.demo.config.BatchProperties;
 import com.batch.demo.web.dto.JobExecutionStatusResponse;
 import com.batch.demo.web.dto.JobLaunchResponse;
 
@@ -42,14 +43,16 @@ public class BatchJobController {
     private final Job orderProcessingJob;
     private final JobExplorer jobExplorer;
     private final JobControlService jobControlService;
+    private final BatchProperties batchProperties;
 
     @PostMapping("/order-processing")
     public ResponseEntity<JobLaunchResponse> launch()
             throws JobExecutionAlreadyRunningException, JobRestartException,
             JobInstanceAlreadyCompleteException, InvalidJobParametersException {
         JobParameters jobParameters = new JobParametersBuilder()
-                .addString("runId", UUID.randomUUID().toString())
-                .addLong("startedAtEpochMs", System.currentTimeMillis())
+                .addLocalDate("businessDate", LocalDate.now())
+                .addString("inputFile", batchProperties.getInputCsvPath())
+                .addLong("startedAtEpochMs", System.currentTimeMillis(), false)
                 .toJobParameters();
 
         JobExecution execution = jobLauncher.run(orderProcessingJob, jobParameters);
