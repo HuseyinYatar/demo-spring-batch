@@ -6,13 +6,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Deterministic, one-shot "let N matching inserts through, then fail the next one"
- * trigger - same latch style as the production FlakyOrderPersistenceSimulator, but
- * test-only and armed explicitly per test rather than auto-resetting per job run.
+ * trigger, parametrized by the SQL fragment to match (e.g. "insert into orders" or
+ * "insert into order_line_item_staging") - the fault-injection scenarios against
+ * different tables need identical logic, just a different match target, so this one
+ * class serves both rather than duplicating the trigger per table.
  */
-public class OrderInsertFaultTrigger {
+public class SqlInsertFaultTrigger {
 
+    private final String matchedSqlFragment;
     private final AtomicInteger remainingSuccesses = new AtomicInteger(-1);
     private final AtomicBoolean fired = new AtomicBoolean(false);
+
+    public SqlInsertFaultTrigger(String matchedSqlFragment) {
+        this.matchedSqlFragment = matchedSqlFragment.toLowerCase(Locale.ROOT);
+    }
 
     public void arm(int allowedSuccessesBeforeFailure) {
         fired.set(false);
@@ -27,7 +34,7 @@ public class OrderInsertFaultTrigger {
         if (remainingSuccesses.get() < 0 || fired.get() || sql == null) {
             return false;
         }
-        if (!sql.trim().toLowerCase(Locale.ROOT).contains("insert into orders")) {
+        if (!sql.trim().toLowerCase(Locale.ROOT).contains(matchedSqlFragment)) {
             return false;
         }
         return remainingSuccesses.getAndDecrement() == 0 && fired.compareAndSet(false, true);

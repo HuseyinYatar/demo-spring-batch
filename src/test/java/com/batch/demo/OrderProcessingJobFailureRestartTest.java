@@ -28,15 +28,15 @@ import com.batch.demo.repository.OrderRepository;
 import com.batch.demo.testsupport.AbstractPostgresIntegrationTest;
 import com.batch.demo.testsupport.BusinessDataCleaner;
 import com.batch.demo.testsupport.StepExecutions;
-import com.batch.demo.testsupport.fault.FaultInjectingDataSourceTestConfig;
-import com.batch.demo.testsupport.fault.OrderInsertFaultTrigger;
+import com.batch.demo.testsupport.fault.OrderFaultInjectionTestConfig;
+import com.batch.demo.testsupport.fault.SqlInsertFaultTrigger;
 import com.batch.demo.web.dto.JobExecutionStatusResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @ActiveProfiles("test")
-@Import(FaultInjectingDataSourceTestConfig.class)
+@Import(OrderFaultInjectionTestConfig.class)
 @SpringBatchTest
 class OrderProcessingJobFailureRestartTest extends AbstractPostgresIntegrationTest {
 
@@ -50,7 +50,7 @@ class OrderProcessingJobFailureRestartTest extends AbstractPostgresIntegrationTe
     private JobControlService jobControlService;
 
     @Autowired
-    private OrderInsertFaultTrigger trigger;
+    private SqlInsertFaultTrigger trigger;
 
     @Autowired
     private OrderRepository orderRepository;

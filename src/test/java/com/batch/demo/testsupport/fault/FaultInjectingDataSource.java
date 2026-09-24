@@ -1,6 +1,7 @@
 package com.batch.demo.testsupport.fault;
 
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -12,15 +13,15 @@ import org.springframework.jdbc.datasource.DelegatingDataSource;
 /**
  * Wraps the real DataSource - including JobRepository's own JDBC access, since this
  * app has exactly one DataSource bean - but is scoped to a no-op for everything except
- * a matching "insert into orders" prepareStatement call, so JobRepository's BATCH_*
- * bookkeeping is never affected. See OrderInsertFaultTrigger for the matching/arming
- * logic.
+ * whatever SqlInsertFaultTrigger's own matching decides, so JobRepository's BATCH_*
+ * bookkeeping is never affected regardless of which table's inserts a given trigger
+ * targets.
  */
 public class FaultInjectingDataSource extends DelegatingDataSource {
 
-    private final OrderInsertFaultTrigger trigger;
+    private final SqlInsertFaultTrigger trigger;
 
-    public FaultInjectingDataSource(DataSource targetDataSource, OrderInsertFaultTrigger trigger) {
+    public FaultInjectingDataSource(DataSource targetDataSource, SqlInsertFaultTrigger trigger) {
         super(targetDataSource);
         this.trigger = trigger;
     }
@@ -39,11 +40,11 @@ public class FaultInjectingDataSource extends DelegatingDataSource {
         InvocationHandler handler = (proxy, method, args) -> {
             if ("prepareStatement".equals(method.getName()) && args != null && args.length > 0
                     && args[0] instanceof String sql && trigger.shouldFailFor(sql)) {
-                throw new SQLException("Injected fault: simulated failure inserting into orders");
+                throw new SQLException("Injected fault: simulated failure preparing statement");
             }
             try {
                 return method.invoke(real, args);
-            } catch (java.lang.reflect.InvocationTargetException e) {
+            } catch (InvocationTargetException e) {
                 throw e.getCause();
             }
         };
