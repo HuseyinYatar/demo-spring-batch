@@ -10,6 +10,7 @@ import org.springframework.batch.core.configuration.annotation.EnableJdbcJobRepo
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.listener.JobExecutionListener;
+import org.springframework.batch.core.repository.explore.JobExplorer;
 import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
@@ -49,15 +50,26 @@ public class BatchJobConfig {
     @Bean
     public JobExecutionListener perRunStateResetListener(RejectedRecordSink rejectedRecordSink,
                                                            FlakyOrderPersistenceSimulator flakySimulator,
-                                                           BatchProperties properties) {
+                                                           BatchProperties properties,
+                                                           JobExplorer jobExplorer) {
         return new JobExecutionListener() {
             @Override
             public void beforeJob(JobExecution jobExecution) {
                 rejectedRecordSink.reset();
                 flakySimulator.reset();
-                // Stale partition files from a previous run (especially one with a
-                // different batch.partition-grid-size) must not be picked up by this
-                // run's mergeInvoiceSummaryStep alongside the fresh ones.
+
+                // A restart of a previously-attempted execution must NOT have its
+                // partition files deleted here: buildInvoicesWorkerStep's
+                // invoiceSummaryCsvItemWriter resumes appending to the same file
+                // (restored from its own saved ExecutionContext) and expects it to
+                // still exist. Only a genuinely fresh JobInstance - which can't have
+                // touched these files itself - gets this stale-file cleanup, guarding
+                // against leftovers from an unrelated prior run (e.g. a different
+                // batch.partition-grid-size).
+                boolean isRestart = jobExplorer.getJobExecutions(jobExecution.getJobInstance()).size() > 1;
+                if (isRestart) {
+                    return;
+                }
                 for (Path partitionFile : InvoiceSummaryPartitionPaths.listPartitionFiles(properties.getInvoiceSummaryOutputPath())) {
                     try {
                         Files.deleteIfExists(partitionFile);
