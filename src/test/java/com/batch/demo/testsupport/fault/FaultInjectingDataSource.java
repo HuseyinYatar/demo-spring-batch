@@ -40,7 +40,7 @@ public class FaultInjectingDataSource extends DelegatingDataSource {
         InvocationHandler handler = (proxy, method, args) -> {
             if ("prepareStatement".equals(method.getName()) && args != null && args.length > 0
                     && args[0] instanceof String sql && trigger.shouldFailFor(sql)) {
-                throw new SQLException("Injected fault: simulated failure preparing statement");
+                throw trigger.buildException();
             }
             try {
                 return method.invoke(real, args);
