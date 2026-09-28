@@ -45,6 +45,11 @@ There is no separate lint step; Lombok annotation processing runs as part of `co
 curl -X POST http://localhost:8080/api/batch/jobs/order-processing
 curl http://localhost:8080/api/batch/jobs/executions/{id}
 
+# Re-triggering the same day fails with 409 (see Idempotency below) - pass an
+# explicit businessDate to get a fresh JobInstance without waiting a day or
+# touching the DB:
+curl -X POST "http://localhost:8080/api/batch/jobs/order-processing?businessDate=2099-01-01"
+
 # Operational control (JobOperator - see Architecture below)
 curl -X POST http://localhost:8080/api/batch/jobs/executions/{id}/stop
 curl -X POST http://localhost:8080/api/batch/jobs/executions/{id}/restart
@@ -171,7 +176,7 @@ If a restart ends up re-running `ingestLineItemsStep` mid-flight (rather than ju
 
 Two layers guard against duplicate work on re-trigger:
 
-- **Job-instance level**: `launch()` builds `JobParameters` from `businessDate` (today) + `inputFile` (`batch.inputCsvPath`), not a random value, so a `JobInstance` is identified by what it processed, not by when it was clicked. A second `POST` for the same business date against an already-completed instance is rejected outright (`JobInstanceAlreadyCompleteException` → 409) rather than launching a parallel run.
+- **Job-instance level**: `launch()` builds `JobParameters` from `businessDate` (defaults to today, but accepts an optional `?businessDate=YYYY-MM-DD` query param - see below) + `inputFile` (`batch.inputCsvPath`), not a random value, so a `JobInstance` is identified by what it processed, not by when it was clicked. A second `POST` for the same business date against an already-completed instance is rejected outright (`JobInstanceAlreadyCompleteException` → 409) rather than launching a parallel run. The `businessDate` override exists specifically so manual/local re-testing on the same calendar day doesn't need to wait until tomorrow or truncate `BATCH_*` tables to get a fresh `JobInstance` - `OrderProcessingJobIdempotencyTest#explicitBusinessDateOverrideAvoidsTheSameDayConflict` verifies it actually avoids the 409 a same-day relaunch would otherwise get.
 - **Row level, across different business dates**: `InvoiceAggregationProcessor` checks `orderRepository.existsByOrderNumber(orderId)` and returns `null` (Spring Batch filters nulls) for orders already invoiced. `OrderLineItemValidationProcessor` does the equivalent one step earlier, checking `OrderLineItemStagingRepository.existsByOrderIdAndProductId(orderId, productId)` before staging a row — regardless of that row's `processed` flag — so re-ingesting the same CSV (e.g. a re-run on a new business date against the unchanged demo file) no longer piles up duplicate staging rows the way it used to.
 
 **Assumptions and remaining gaps, worth knowing before extending this:**

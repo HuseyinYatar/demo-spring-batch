@@ -45,13 +45,13 @@ The job does **not** run automatically on startup (`spring.batch.job.enabled=fal
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/batch/jobs/order-processing` | Launch a new job execution |
+| `POST` | `/api/batch/jobs/order-processing?businessDate=YYYY-MM-DD` | Launch a new job execution (`businessDate` optional, defaults to today) |
 | `GET` | `/api/batch/jobs/executions/{id}` | Get a job execution's status/counts |
 | `POST` | `/api/batch/jobs/executions/{id}/stop` | Request a graceful stop of a running execution |
 | `POST` | `/api/batch/jobs/executions/{id}/restart` | Restart a stopped/failed execution (resumes, doesn't start over) |
 | `POST` | `/api/batch/jobs/executions/{id}/abandon` | Mark a non-restartable execution as abandoned |
 
-`stop`/`restart`/`abandon` are backed by Spring Batch's `JobOperator`. Errors map to proper HTTP status codes: `404` for an unknown execution id, `409` for an invalid state transition (e.g. restarting an execution that's still running, or launching a job for a business date that's already completed).
+`stop`/`restart`/`abandon` are backed by Spring Batch's `JobOperator`. Errors map to proper HTTP status codes: `404` for an unknown execution id, `409` for an invalid state transition (e.g. restarting an execution that's still running, or launching a job for a business date that's already completed). That last case is also the reason `businessDate` is overridable on launch: re-triggering with no query param twice on the same calendar day always gets the second one rejected with `409` by design (see Idempotency below) — pass a different `businessDate` to get a fresh run instead of waiting until tomorrow.
 
 ## Architecture
 
