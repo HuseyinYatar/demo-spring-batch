@@ -70,6 +70,19 @@ class OrderProcessingJobIdempotencyTest extends AbstractPostgresIntegrationTest 
     }
 
     @Test
+    void explicitBusinessDateOverrideAvoidsTheSameDayConflict() throws Exception {
+        mockMvc.perform(post("/api/batch/jobs/order-processing"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+
+        // Same calendar day as the first launch, but a caller-supplied businessDate is
+        // a different JobInstance identity - so this must succeed, not 409.
+        mockMvc.perform(post("/api/batch/jobs/order-processing").param("businessDate", "2099-01-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+    }
+
+    @Test
     void reRunWithDifferentBusinessDateDoesNotDuplicateRows() throws Exception {
         JobParameters firstRun = new JobParametersBuilder()
                 .addLocalDate("businessDate", LocalDate.now())

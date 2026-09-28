@@ -17,6 +17,7 @@ import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.core.task.support.ContextPropagatingTaskDecorator;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import com.batch.demo.batch.reject.RejectedRecordSink;
@@ -43,6 +44,15 @@ public class BatchJobConfig {
         executor.setCorePoolSize(properties.getPartitionGridSize());
         executor.setMaxPoolSize(properties.getPartitionGridSize());
         executor.setThreadNamePrefix("batch-partition-");
+        // Without this, the tracing span/observation active on the manager
+        // thread (the one running ingestLineItemsStep/buildInvoicesStep and
+        // submitting partitions) never reaches the worker threads this
+        // executor runs partitions on - each partition's step/chunk spans
+        // would show up as disconnected, parentless traces instead of
+        // nesting under the job/step span. Boot doesn't apply this
+        // decorator automatically here because batchTaskExecutor is a
+        // manually-declared bean, not the auto-configured TaskExecutor.
+        executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }

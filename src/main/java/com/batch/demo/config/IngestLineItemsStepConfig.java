@@ -24,6 +24,7 @@ import jakarta.persistence.EntityManagerFactory;
 
 import com.batch.demo.batch.dto.OrderLineCsvRecord;
 import com.batch.demo.batch.listener.RejectedRecordSkipListener;
+import com.batch.demo.batch.observability.ChunkTracingListener;
 import com.batch.demo.batch.step1.IngestRetryListener;
 import com.batch.demo.batch.step1.LineRangePartitioner;
 import com.batch.demo.batch.step1.OrderLineFieldSetMapper;
@@ -75,7 +76,8 @@ public class IngestLineItemsStepConfig {
                                            ItemProcessor<OrderLineCsvRecord, OrderLineItemStaging> orderLineItemValidationProcessor,
                                            ItemWriter<OrderLineItemStaging> orderLineItemStagingWriter,
                                            RejectedRecordSkipListener rejectedRecordSkipListener,
-                                           IngestRetryListener ingestRetryListener) {
+                                           IngestRetryListener ingestRetryListener,
+                                           ChunkTracingListener chunkTracingListener) {
         return new StepBuilder("ingestLineItemsWorkerStep", jobRepository)
                 .<OrderLineCsvRecord, OrderLineItemStaging>chunk(properties.getChunkSize(), transactionManager)
                 .reader(orderLineItemReader)
@@ -86,6 +88,7 @@ public class IngestLineItemsStepConfig {
                 .skip(InvalidOrderLineException.class)
                 .skipLimit(properties.getSkipLimit())
                 .listener(rejectedRecordSkipListener)
+                .listener(chunkTracingListener)
                 // Real DB connection failures are retried, never skipped - same
                 // reasoning as buildInvoicesStep: silently skipping a row because the
                 // DB blipped would drop it with no audit trail, unlike the
