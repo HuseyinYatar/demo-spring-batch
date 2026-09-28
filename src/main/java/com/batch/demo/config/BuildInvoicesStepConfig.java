@@ -21,6 +21,7 @@ import org.springframework.dao.TransientDataAccessException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.batch.demo.batch.dto.OrderInvoiceResult;
+import com.batch.demo.batch.observability.ChunkTracingListener;
 import com.batch.demo.batch.step2.DistinctOrderIdItemReader;
 import com.batch.demo.batch.step2.InvoiceSummaryMergeTasklet;
 import com.batch.demo.batch.step2.InvoiceSummaryFieldExtractor;
@@ -93,7 +94,8 @@ public class BuildInvoicesStepConfig {
                                          DistinctOrderIdItemReader distinctOrderIdItemReader,
                                          ItemProcessor<String, OrderInvoiceResult> invoiceAggregationProcessor,
                                          ItemWriter<OrderInvoiceResult> invoiceCompositeItemWriter,
-                                         InvoiceWriteRetryListener invoiceWriteRetryListener) {
+                                         InvoiceWriteRetryListener invoiceWriteRetryListener,
+                                         ChunkTracingListener chunkTracingListener) {
         return new StepBuilder("buildInvoicesWorkerStep", jobRepository)
                 .<String, OrderInvoiceResult>chunk(properties.getChunkSize(), transactionManager)
                 .reader(distinctOrderIdItemReader)
@@ -108,6 +110,7 @@ public class BuildInvoicesStepConfig {
                 .retry(DataAccessResourceFailureException.class)
                 .retryLimit(properties.getRetryLimit())
                 .listener(invoiceWriteRetryListener)
+                .listener(chunkTracingListener)
                 .build();
     }
 

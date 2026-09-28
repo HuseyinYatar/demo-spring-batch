@@ -16,9 +16,9 @@ The whole pipeline runs partitioned across configurable worker threads, is idemp
 - Spring Batch 6.0.5 — chunk-oriented steps, partitioning, fault tolerance, `JobOperator`
 - Spring Data JPA / Hibernate, PostgreSQL
 - Spring Web (REST API)
-- Spring Boot Actuator + Micrometer (Prometheus registry)
+- Spring Boot Actuator + Micrometer (Prometheus registry, Tracing/OpenTelemetry)
 - Lombok
-- Prometheus + Grafana (via Docker Compose)
+- Prometheus + Grafana + Tempo (via Docker Compose)
 - Testcontainers (integration tests — isolated, disposable Postgres per test class)
 
 ## Quickstart
@@ -26,7 +26,7 @@ The whole pipeline runs partitioned across configurable worker threads, is idemp
 Requires Docker and a local JDK 21 (the Maven wrapper is checked in, no local Maven install needed).
 
 ```bash
-# 1. Start Postgres, Prometheus, and Grafana
+# 1. Start Postgres, Prometheus, Grafana, and Tempo
 docker compose up -d
 
 # 2. Run the app (Windows: use mvnw.cmd)
@@ -142,8 +142,9 @@ All under the `batch.*` prefix (`application.properties`):
 
 - **Grafana** — `http://localhost:3000` (anonymous viewer access, no login needed):
   - *Batch Job & Step Executions* — every job/step execution row, queried directly from Postgres.
-  - *Batch Metrics (Prometheus)* — job/step duration trends and JVM heap, queried from Prometheus.
+  - *Batch Metrics (Prometheus)* — job/step duration trends, queried from Prometheus.
 - **Prometheus** — `http://localhost:9090`, scraping `/actuator/prometheus` every 15s.
+- **Tempo** — one trace per job run: job span → step spans (including each partition) → per-chunk spans within each partition. No UI of its own; browse traces via Grafana's "Tempo" datasource (`http://localhost:3000`). Actuator's own traffic (Prometheus's 15s scrape, health checks) is deliberately excluded from tracing so it doesn't drown out the traces that matter.
 
 Actuator endpoints:
 
@@ -189,6 +190,7 @@ The integration suite exercises the fault-tolerance and operational-control beha
 - **Idempotency** — a same-day relaunch is rejected (`409`), and a relaunch on a different business date against the same input doesn't duplicate any rows (`OrderProcessingJobIdempotencyTest`).
 - **Operational control** — `stop` genuinely interrupts a running job and `abandon` transitions a stopped execution correctly (`JobControlOperationsTest`).
 - **Real parallelism** — every other test pins `batch.partition-grid-size=1` for determinism; `PartitionedProcessingTest` raises it back up to verify multi-partition runs merge correctly with nothing dropped or duplicated across partition boundaries.
+- **Tracing** — every partition of both worker steps produces per-chunk spans, and they all share one trace instead of starting disconnected ones — proof the trace context actually survives the hop onto `batchTaskExecutor`'s worker threads (`ChunkTracingSpansTest`); actuator requests produce no spans while real application requests still do (`ActuatorObservationExclusionTest`).
 
 ## Known limitations (demo scope)
 
@@ -196,5 +198,6 @@ The integration suite exercises the fault-tolerance and operational-control beha
 - The row-level dedup key (`orderId` + `productId`) assumes an order has at most one line item per product; it also detects and drops exact re-deliveries but doesn't reconcile *corrections* — a resend with a different quantity/price is treated as a duplicate and silently dropped, the original wins.
 - Grafana runs with anonymous viewer access and default credentials — fine for local use, not for anything internet-facing.
 - Actuator endpoints are unauthenticated.
+- Tracing samples every job execution (`management.tracing.sampling.probability=1.0`) — a real deployment would sample a small fraction instead.
 
 See `CLAUDE.md` for a deeper architectural walkthrough, including the specific Spring Batch 6.0 package-relocation gotchas and design rationale for each major decision.
