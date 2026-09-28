@@ -12,7 +12,7 @@
       "id": 1,
       "type": "stat",
       "title": "Job Runs Recorded",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
       "targets": [
         {
@@ -25,13 +25,20 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          },
           "mappings": []
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "value",
@@ -43,12 +50,12 @@
       "id": 2,
       "type": "stat",
       "title": "Max Job Duration (s)",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
-          "expr": "max(spring_batch_job_seconds_max)",
+          "expr": "max(max_over_time(spring_batch_job_seconds_max[$__range]))",
           "instant": true,
           "refId": "A"
         }
@@ -57,13 +64,20 @@
         "defaults": {
           "color": { "mode": "thresholds" },
           "unit": "s",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "orange", "value": null }]
+          },
           "mappings": []
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "value",
@@ -75,7 +89,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Cumulative Job Time (s)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
       "targets": [
         {
@@ -92,7 +106,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Cumulative Step Time (s) by Step",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
       "targets": [
         {
@@ -103,23 +117,6 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
-      "options": {}
-    },
-    {
-      "id": 5,
-      "type": "timeseries",
-      "title": "JVM Heap Used (bytes)",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
-          "expr": "jvm_memory_used_bytes{area=\"heap\"}",
-          "legendFormat": "{{id}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
       "options": {}
     }
   ]
