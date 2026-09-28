@@ -16,9 +16,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.batch.demo.batch.dto.OrderInvoiceResult;
+import com.batch.demo.batch.observability.ChunkTracingListener;
 import com.batch.demo.batch.step2.DistinctOrderIdItemReader;
 import com.batch.demo.batch.step2.InvoiceSummaryMergeTasklet;
 import com.batch.demo.batch.step2.InvoiceSummaryFieldExtractor;
@@ -37,9 +40,10 @@ public class BuildInvoicesStepConfig {
     @StepScope
     public DistinctOrderIdItemReader distinctOrderIdItemReader(
             OrderLineItemStagingRepository stagingRepository,
+            BatchProperties properties,
             @Value("#{stepExecutionContext['fromOrderId']}") String fromOrderId,
             @Value("#{stepExecutionContext['toOrderId']}") String toOrderId) {
-        return new DistinctOrderIdItemReader(stagingRepository, fromOrderId, toOrderId);
+        return new DistinctOrderIdItemReader(stagingRepository, fromOrderId, toOrderId, properties.getOrderIdPageSize());
     }
 
     /**
@@ -90,7 +94,8 @@ public class BuildInvoicesStepConfig {
                                          DistinctOrderIdItemReader distinctOrderIdItemReader,
                                          ItemProcessor<String, OrderInvoiceResult> invoiceAggregationProcessor,
                                          ItemWriter<OrderInvoiceResult> invoiceCompositeItemWriter,
-                                         InvoiceWriteRetryListener invoiceWriteRetryListener) {
+                                         InvoiceWriteRetryListener invoiceWriteRetryListener,
+                                         ChunkTracingListener chunkTracingListener) {
         return new StepBuilder("buildInvoicesWorkerStep", jobRepository)
                 .<String, OrderInvoiceResult>chunk(properties.getChunkSize(), transactionManager)
                 .reader(distinctOrderIdItemReader)
@@ -98,10 +103,14 @@ public class BuildInvoicesStepConfig {
                 .writer(invoiceCompositeItemWriter)
                 .faultTolerant()
                 .retry(TransientInvoiceWriteException.class)
+                // Real DB failures get the same retry treatment as the simulated one -
+                // see IngestLineItemsStepConfig for why neither is registered as
+                // skippable.
+                .retry(TransientDataAccessException.class)
+                .retry(DataAccessResourceFailureException.class)
                 .retryLimit(properties.getRetryLimit())
-                .skip(TransientInvoiceWriteException.class)
-                .skipLimit(properties.getSkipLimit())
                 .listener(invoiceWriteRetryListener)
+                .listener(chunkTracingListener)
                 .build();
     }
 

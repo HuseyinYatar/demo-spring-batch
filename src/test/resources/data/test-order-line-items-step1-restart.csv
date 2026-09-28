@@ -1,0 +1,7 @@
+orderId,customerId,customerName,productId,productName,quantity,unitPrice,orderDate
+ORD-M01,CUST-M01,Restart Customer 1,P501,Product A,1,10.00,2025-05-01
+ORD-M02,CUST-M02,Restart Customer 2,P502,Product B,1,10.00,2025-05-01
+ORD-M03,CUST-M03,Restart Customer 3,P503,Product C,1,10.00,2025-05-01
+ORD-M04,CUST-M04,Restart Customer 4,P504,Product D,1,10.00,2025-05-01
+ORD-M05,CUST-M05,Restart Customer 5,P505,Product E,1,10.00,2025-05-01
+ORD-M06,CUST-M06,Restart Customer 6,P506,Product F,1,10.00,2025-05-01

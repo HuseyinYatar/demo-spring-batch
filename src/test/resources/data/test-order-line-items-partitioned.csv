@@ -1,0 +1,11 @@
+orderId,customerId,customerName,productId,productName,quantity,unitPrice,orderDate
+ORD-P01,CUST-P01,Partition Customer 1,P401,Product A,1,10.00,2025-04-01
+ORD-P02,CUST-P02,Partition Customer 2,P402,Product B,2,20.00,2025-04-01
+ORD-P02,CUST-P02,Partition Customer 2,P403,Product C,1,30.00,2025-04-01
+ORD-P03,CUST-P03,Partition Customer 3,P404,Product D,1,10.00,2025-04-01
+ORD-P04,CUST-P04,Partition Customer 4,P405,Product E,1,10.00,2025-04-01
+ORD-P05,CUST-P05,Partition Customer 5,P406,Product F,1,10.00,2025-04-01
+ORD-P06,CUST-P06,Partition Customer 6,P407,Product G,1,10.00,2025-04-01
+ORD-P07,CUST-P07,Partition Customer 7,P408,Product H,1,10.00,2025-04-01
+ORD-P08,CUST-P08,Partition Customer 8,P409,Product I,1,10.00,2025-04-01
+ORD-P09,CUST-P09,Partition Customer 9,P410,Product J,1,10.00,2025-04-01

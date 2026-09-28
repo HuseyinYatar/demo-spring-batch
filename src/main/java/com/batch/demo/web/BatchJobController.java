@@ -1,6 +1,6 @@
 package com.batch.demo.web;
 
-import java.util.UUID;
+import java.time.LocalDate;
 
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
@@ -15,14 +15,17 @@ import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.launch.JobRestartException;
 import org.springframework.batch.core.launch.NoSuchJobException;
 import org.springframework.batch.core.launch.NoSuchJobExecutionException;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.batch.demo.batch.control.JobControlService;
+import com.batch.demo.config.BatchProperties;
 import com.batch.demo.web.dto.JobExecutionStatusResponse;
 import com.batch.demo.web.dto.JobLaunchResponse;
 
@@ -42,14 +45,21 @@ public class BatchJobController {
     private final Job orderProcessingJob;
     private final JobExplorer jobExplorer;
     private final JobControlService jobControlService;
+    private final BatchProperties batchProperties;
 
     @PostMapping("/order-processing")
-    public ResponseEntity<JobLaunchResponse> launch()
+    public ResponseEntity<JobLaunchResponse> launch(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate businessDate)
             throws JobExecutionAlreadyRunningException, JobRestartException,
             JobInstanceAlreadyCompleteException, InvalidJobParametersException {
+        // businessDate is part of what identifies a JobInstance (see Idempotency in
+        // CLAUDE.md) - defaulting to today means a same-day relaunch is correctly
+        // rejected as a duplicate, but also means manual/local re-testing on the same
+        // day has no way to get a fresh JobInstance without this override.
         JobParameters jobParameters = new JobParametersBuilder()
-                .addString("runId", UUID.randomUUID().toString())
-                .addLong("startedAtEpochMs", System.currentTimeMillis())
+                .addLocalDate("businessDate", businessDate != null ? businessDate : LocalDate.now())
+                .addString("inputFile", batchProperties.getInputCsvPath())
+                .addLong("startedAtEpochMs", System.currentTimeMillis(), false)
                 .toJobParameters();
 
         JobExecution execution = jobLauncher.run(orderProcessingJob, jobParameters);

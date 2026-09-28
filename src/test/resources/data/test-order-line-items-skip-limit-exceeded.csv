@@ -1,0 +1,8 @@
+orderId,customerId,customerName,productId,productName,quantity,unitPrice,orderDate
+ORD-X01,CUST-X01,Skip Limit Customer 1,P301,Product A,notanumber,10.00,2025-03-01
+ORD-X02,CUST-X02,Skip Limit Customer 2,P302,Product B,1,notaprice,2025-03-01
+ORD-X03,CUST-X03,Skip Limit Customer 3,P303,Product C,1,10.00,01-03-2025
+,CUST-X04,Skip Limit Customer 4,P304,Product D,1,10.00,2025-03-01
+ORD-X05,CUST-X05,,P305,Product E,1,10.00,2025-03-01
+ORD-X06,CUST-X06,Skip Limit Customer 6,P306,Product F,0,10.00,2025-03-01
+ORD-X07,CUST-X07,Skip Limit Customer 7,P307,Product G,1,0,2025-03-01

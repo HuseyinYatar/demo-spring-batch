@@ -16,9 +16,10 @@ public class BatchProperties {
     private String rejectsFilePath = "rejected-rows.csv";
     private String invoiceSummaryOutputPath = "invoice-summary.csv";
     private BigDecimal taxRate = new BigDecimal("0.18");
-    private int chunkSize = 5;
+    private int chunkSize =100;
     private int skipLimit = 20;
     private int retryLimit = 3;
     private boolean simulateTransientWriteFailures = true;
     private int partitionGridSize = 6;
+    private int orderIdPageSize = 500;
 }

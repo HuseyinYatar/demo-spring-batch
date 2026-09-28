@@ -1,0 +1,8 @@
+orderId,customerId,customerName,productId,productName,quantity,unitPrice,orderDate
+ORD-R01,CUST-R01,Reject Test Customer 1,P201,Product A,2,10.00,2025-02-01
+ORD-R02,CUST-R02,Reject Test Customer 2,P202,Product B,1,20.00,2025-02-01
+ORD-R03,CUST-R03,Reject Test Customer 3,P203,Product C,3,5.00,2025-02-01
+ORD-R04,CUST-R04,Reject Test Customer 4,P204,Product D,notanumber,15.00,2025-02-01
+ORD-R05,CUST-R05,Reject Test Customer 5,P205,Product E,1,15.00,01-02-2025
+,CUST-R06,Reject Test Customer 6,P206,Product F,1,15.00,2025-02-01
+ORD-R07,CUST-R07,,P207,Product G,0,15.00,2025-02-01

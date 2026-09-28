@@ -1,0 +1,8 @@
+orderId,customerId,customerName,productId,productName,quantity,unitPrice,orderDate
+ORD-T01,CUST-T01,Test Customer 1,P101,Wireless Mouse,2,25.50,2025-01-01
+ORD-T02,CUST-T02,Test Customer 2,P101,Wireless Mouse,1,25.50,2025-01-01
+ORD-T02,CUST-T02,Test Customer 2,P102,Mechanical Keyboard,1,75.00,2025-01-01
+ORD-T03,CUST-T03,Test Customer 3,P103,27in Monitor,1,220.00,2025-01-01
+ORD-T04,CUST-T04,Test Customer 4,P104,USB-C Hub,3,15.30,2025-01-01
+ORD-T05,CUST-T05,Test Customer 5,P105,Headset Stand,5,12.00,2025-01-01
+ORD-T06,CUST-T06,Test Customer 6,P101,Wireless Mouse,1,25.50,2025-01-01
