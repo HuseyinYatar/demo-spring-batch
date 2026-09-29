@@ -4,7 +4,7 @@ A Spring Batch demo that ingests a CSV of order line items, validates and aggreg
 
 ## What it does
 
-1. **Ingest** — reads a CSV of raw order line items, validates each row, and lands valid ones in a staging table. Malformed rows (bad CSV format, non-numeric price, bad date) and business-rule violations (negative quantity/price, blank customer/order id) are skipped and logged to `rejected-rows.csv`, not silently dropped or allowed to crash the job. A real DB failure (dropped connection, lock timeout) is retried instead, never skipped.
+1. **Ingest** — reads a CSV of raw order line items, validates each row, and lands valid ones in a staging table. Malformed rows (bad CSV format, non-numeric price, bad date) and business-rule violations (negative quantity/price, blank customer/order id) are skipped and logged to `rejected-rows.csv`, not silently dropped or allowed to crash the job. The file is reset for each new run but left intact on a restart, so rows rejected before a failure are never lost. A real DB failure (dropped connection, lock timeout) is retried instead, never skipped.
 2. **Aggregate & invoice** — groups staged line items by order, computes tax/totals, and persists an `Order` + `Invoice` per order. A genuinely simulated transient-write failure exercises the retry policy on every run; a real DB failure is retried the same way — but unlike a malformed row, it's never silently skipped, since a skipped invoice would vanish with no audit trail. If retries are exhausted, the job fails loudly and is meant to be resumed via `POST .../restart`, not silently patched over.
 3. **Merge** — recombines the partitioned output into one `invoice-summary.csv`.
 
@@ -155,7 +155,7 @@ All under the `batch.*` prefix (`application.properties`):
 | Property                                  | Default                               | Description                                                        |
 | ----------------------------------------- | ------------------------------------- | ------------------------------------------------------------------ |
 | `batch.input-csv-path`                    | `classpath:data/order-line-items.csv` | Source CSV                                                         |
-| `batch.rejects-file-path`                 | `rejected-rows.csv`                   | Skip audit log                                                     |
+| `batch.rejects-file-path`                 | `rejected-rows.csv`                   | Skip audit log (reset per new run, preserved across restarts)      |
 | `batch.invoice-summary-output-path`       | `invoice-summary.csv`                 | Final merged output                                                |
 | `batch.tax-rate`                          | `0.18`                                | Applied to invoice subtotals                                       |
 | `batch.chunk-size`                        | `5`                                   | Items per commit chunk                                             |
