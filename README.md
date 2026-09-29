@@ -1,12 +1,14 @@
 # Daily E-commerce Order & Invoice Processing
 
-A Spring Batch demo that ingests a CSV of order line items, validates and aggregates them into invoices, and persists the results to PostgreSQL — with real fault-tolerance (skip, retry), partitioned parallel processing, operational job control, and a full observability stack. Built to demonstrate production-shaped patterns, not a happy-path-only toy.
+A Spring Batch demo that ingests a CSV of order line items, validates and aggregates them into invoices, and persists the results to PostgreSQL — with real fault-tolerance (skip, retry), partitioned parallel processing, operational job control, job composition, and a full observability stack.
 
 ## What it does
 
 1. **Ingest** — reads a CSV of raw order line items, validates each row, and lands valid ones in a staging table. Malformed rows (bad CSV format, non-numeric price, bad date) and business-rule violations (negative quantity/price, blank customer/order id) are skipped and logged to `rejected-rows.csv`, not silently dropped or allowed to crash the job. A real DB failure (dropped connection, lock timeout) is retried instead, never skipped.
 2. **Aggregate & invoice** — groups staged line items by order, computes tax/totals, and persists an `Order` + `Invoice` per order. A genuinely simulated transient-write failure exercises the retry policy on every run; a real DB failure is retried the same way — but unlike a malformed row, it's never silently skipped, since a skipped invoice would vanish with no audit trail. If retries are exhausted, the job fails loudly and is meant to be resumed via `POST .../restart`, not silently patched over.
 3. **Merge** — recombines the partitioned output into one `invoice-summary.csv`.
+
+A separate **daily pipeline** job composes the whole order-processing job above with a second, downstream **daily sales report** job — reading that day's invoices, writing a detail CSV, and upserting a per-day summary (invoice count, totals, top customer) — as a single orchestrated run. See [Job composition](#job-composition-daily-pipeline) below.
 
 The whole pipeline runs partitioned across configurable worker threads, is idempotent on re-trigger (both at the job-instance level and the row level), and exposes REST endpoints to launch, inspect, stop, restart, and abandon job executions.
 
@@ -43,19 +45,20 @@ The job does **not** run automatically on startup (`spring.batch.job.enabled=fal
 
 ## REST API
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/batch/jobs/order-processing?businessDate=YYYY-MM-DD` | Launch a new job execution (`businessDate` optional, defaults to today) |
-| `GET` | `/api/batch/jobs/executions/{id}` | Get a job execution's status/counts |
-| `POST` | `/api/batch/jobs/executions/{id}/stop` | Request a graceful stop of a running execution |
-| `POST` | `/api/batch/jobs/executions/{id}/restart` | Restart a stopped/failed execution (resumes, doesn't start over) |
-| `POST` | `/api/batch/jobs/executions/{id}/abandon` | Mark a non-restartable execution as abandoned |
+| Method | Endpoint                                                   | Description                                                                    |
+| ------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `POST` | `/api/batch/jobs/order-processing?businessDate=YYYY-MM-DD` | Launch a new job execution (`businessDate` optional, defaults to today)        |
+| `POST` | `/api/batch/jobs/daily-pipeline?businessDate=YYYY-MM-DD`   | Launch order-processing followed by the daily sales report as one composed run |
+| `GET`  | `/api/batch/jobs/executions/{id}`                          | Get a job execution's status/counts                                            |
+| `POST` | `/api/batch/jobs/executions/{id}/stop`                     | Request a graceful stop of a running execution                                 |
+| `POST` | `/api/batch/jobs/executions/{id}/restart`                  | Restart a stopped/failed execution (resumes, doesn't start over)               |
+| `POST` | `/api/batch/jobs/executions/{id}/abandon`                  | Mark a non-restartable execution as abandoned                                  |
 
 `stop`/`restart`/`abandon` are backed by Spring Batch's `JobOperator`. Errors map to proper HTTP status codes: `404` for an unknown execution id, `409` for an invalid state transition (e.g. restarting an execution that's still running, or launching a job for a business date that's already completed). That last case is also the reason `businessDate` is overridable on launch: re-triggering with no query param twice on the same calendar day always gets the second one rejected with `409` by design (see Idempotency below) — pass a different `businessDate` to get a fresh run instead of waiting until tomorrow.
 
 ## Architecture
 
-### Job flow
+### Job flow: order processing
 
 ```mermaid
 flowchart TD
@@ -95,11 +98,35 @@ Both processing steps are **partitioned**: the input is split into disjoint rang
 - **`buildInvoicesStep`** — reads distinct unprocessed order ids from staging, aggregates their line items into an `Order`/`Invoice`, and writes the result to three places in one transaction: the database, a per-partition CSV summary, and back to staging (marking it processed). Both a simulated transient failure and a real DB failure demonstrate the retry policy — the chunk rolls back cleanly and retries; if retries are ever exhausted, the step (and job) fails outright rather than silently skipping an invoice. `DistinctOrderIdItemReader` fetches order ids page-by-page via keyset pagination (`orderId > lastSeenId`, capped by `batch.order-id-page-size`) rather than loading a partition's entire id range into memory at once.
 - **`mergeInvoiceSummaryStep`** — recombines the per-partition invoice-summary files into the single `invoice-summary.csv`, then removes the partition files.
 
+### Job composition: daily pipeline
+
+`dailyPipelineJob` nests two whole jobs as steps of a parent job (Spring Batch's `JobStep`), rather than being its own hand-written flow:
+
+```mermaid
+flowchart LR
+    subgraph Pipeline["dailyPipelineJob"]
+        S1["orderProcessingJobStep\n(JobStep)"] --> S2["dailySalesReportJobStep\n(JobStep)"]
+    end
+    S1 -. runs .-> J1["orderProcessingJob\n(same job as /order-processing)"]
+    S2 -. runs .-> J2["dailySalesReportJob"]
+    J2 --> D1["dailyInvoiceDetailStep\n(chunk, JpaPagingItemReader)"]
+    D1 --> D2["dailySalesSummaryStep\n(tasklet: aggregate + upsert)"]
+    D2 --> OUT1[("daily-sales-detail-*.csv")]
+    D2 --> OUT2[("daily_sales_report row")]
+```
+
+- Launched via `POST /api/batch/jobs/daily-pipeline`, same `businessDate`/`inputFile` parameter shape as `/order-processing`.
+- **Restart resumes correctly at the job level, not just the step level**: if the report job fails after order processing already completed, `POST .../restart` re-runs only the failed nested job — the already-completed `orderProcessingJob` execution is left untouched, exactly like a normal step restart.
+- A quirk worth knowing: calling `/daily-pipeline` for a `businessDate` already covered by a standalone `/order-processing` run doesn't `409` the way two `/order-processing` calls would — the orchestrator's own instance is new, but the nested order-processing attempt inside it fails, so the response is `200` with `"status": "FAILED"` in the body.
+- The report's `issuedDate` filter is keyed off `businessDate`, but invoices themselves are always stamped with the wall-clock date — so, like `/order-processing`, this is meant to be run same-day; a `businessDate` override (used to dodge a same-day conflict) produces an empty report rather than an error.
+
+See `CLAUDE.md` for the full mechanics (`JobOperator` vs. `JobLauncher` inside `JobStep`, the `@Primary`/`JobRegistry` wiring this required, and what's actually verified by `DailyPipelineJobRestartTest`).
+
 ### Fault tolerance
 
 - **Skip**: malformed/invalid rows in step 1 are skipped up to `batch.skip-limit`, logged with full context, and don't fail the job. Skip is reserved for genuine data-quality problems — it's never used for infrastructure failures.
 - **Retry**: real DB failures (a dropped connection, a lock timeout) and step 2's simulated transient failure are retried up to `batch.retry-limit` in both steps. If retries are exhausted, the step/job fails outright rather than silently skipping the row — a skipped write would have no audit trail, so failing loudly (and resuming via `POST .../restart`) is the safer default.
-- **Idempotency**: re-triggering the job is safe at two levels — a second launch for the same business date against an already-completed run is rejected outright (`409`), and re-ingesting the same input on a *different* business date detects already-staged/already-invoiced rows and skips re-inserting them rather than duplicating.
+- **Idempotency**: re-triggering the job is safe at two levels — a second launch for the same business date against an already-completed run is rejected outright (`409`), and re-ingesting the same input on a _different_ business date detects already-staged/already-invoiced rows and skips re-inserting them rather than duplicating.
 
 ### Operational control
 
@@ -107,9 +134,9 @@ Spring Batch's `JobOperator` is exposed via REST for stopping, restarting, and a
 
 ```mermaid
 stateDiagram-v2
-    [*] --> STARTED: POST /order-processing
+    [*] --> STARTED: POST /order-processing or /daily-pipeline
     STARTED --> COMPLETED: all steps finish
-    STARTED --> FAILED: skip limit exceeded / retries exhausted
+    STARTED --> FAILED: skip limit exceeded / retries exhausted / nested job failed
     STARTED --> STOPPING: POST /stop
     STOPPING --> STOPPED
     STOPPED --> STARTED: POST /restart (resumes, not from scratch)
@@ -119,30 +146,34 @@ stateDiagram-v2
     ABANDONED --> [*]
 ```
 
+`stop`/`restart`/`abandon` operate on an execution id regardless of which endpoint launched it — the same state machine applies to a `dailyPipelineJob` execution as to a plain `orderProcessingJob` one; restarting a failed pipeline execution resumes only its failed nested job, not the whole thing from scratch (see [Job composition](#job-composition-daily-pipeline) above).
+
 ## Configuration
 
 All under the `batch.*` prefix (`application.properties`):
 
-| Property | Default | Description |
-|---|---|---|
-| `batch.input-csv-path` | `classpath:data/order-line-items.csv` | Source CSV |
-| `batch.rejects-file-path` | `rejected-rows.csv` | Skip audit log |
-| `batch.invoice-summary-output-path` | `invoice-summary.csv` | Final merged output |
-| `batch.tax-rate` | `0.18` | Applied to invoice subtotals |
-| `batch.chunk-size` | `5` | Items per commit chunk |
-| `batch.skip-limit` | `20` | Max skips before the step fails |
-| `batch.retry-limit` | `3` | Max retry attempts on transient write failure |
-| `batch.simulate-transient-write-failures` | `true` | Toggle the retry-policy demo |
-| `batch.partition-grid-size` | `6` | Partitions (and worker threads) per step |
-| `batch.order-id-page-size` | `500` | Max order ids fetched per keyset page in step 2's reader |
+| Property                                  | Default                               | Description                                                        |
+| ----------------------------------------- | ------------------------------------- | ------------------------------------------------------------------ |
+| `batch.input-csv-path`                    | `classpath:data/order-line-items.csv` | Source CSV                                                         |
+| `batch.rejects-file-path`                 | `rejected-rows.csv`                   | Skip audit log                                                     |
+| `batch.invoice-summary-output-path`       | `invoice-summary.csv`                 | Final merged output                                                |
+| `batch.tax-rate`                          | `0.18`                                | Applied to invoice subtotals                                       |
+| `batch.chunk-size`                        | `5`                                   | Items per commit chunk                                             |
+| `batch.skip-limit`                        | `20`                                  | Max skips before the step fails                                    |
+| `batch.retry-limit`                       | `3`                                   | Max retry attempts on transient write failure                      |
+| `batch.simulate-transient-write-failures` | `true`                                | Toggle the retry-policy demo                                       |
+| `batch.partition-grid-size`               | `6`                                   | Partitions (and worker threads) per step                           |
+| `batch.order-id-page-size`                | `500`                                 | Max order ids fetched per keyset page in step 2's reader           |
+| `batch.daily-sales-report-output-dir`     | `daily-sales-reports`                 | Output directory for the daily pipeline's detail/top-customer CSVs |
+| `batch.report-top-customer-count`         | `3`                                   | Top-N customers by spend included in the daily sales report        |
 
 ## Observability
 
 `docker compose up -d` also starts:
 
 - **Grafana** — `http://localhost:3000` (anonymous viewer access, no login needed):
-  - *Batch Job & Step Executions* — every job/step execution row, queried directly from Postgres.
-  - *Batch Metrics (Prometheus)* — job/step duration trends, queried from Prometheus.
+  - _Batch Job & Step Executions_ — every job/step execution row, queried directly from Postgres.
+  - _Batch Metrics (Prometheus)_ — job/step duration trends, queried from Prometheus.
 - **Prometheus** — `http://localhost:9090`, scraping `/actuator/prometheus` every 15s.
 - **Tempo** — one trace per job run: job span → step spans (including each partition) → per-chunk spans within each partition. No UI of its own; browse traces via Grafana's "Tempo" datasource (`http://localhost:3000`). Actuator's own traffic (Prometheus's 15s scrape, health checks) is deliberately excluded from tracing so it doesn't drown out the traces that matter.
 
@@ -165,8 +196,9 @@ src/main/java/com/batch/demo/
     reject/      Rejected-record sink abstraction
     step1/       Ingest step: CSV mapping, validation processor, line-range partitioner
     step2/       Invoice step: aggregation, retry simulation, order-id partitioner, CSV merge
+    step3/       Daily sales report step: detail CSV field extractor, summary tasklet
     validation/  Pluggable business-rule validators (Open/Closed)
-  config/        Job/step wiring, batch properties
+  config/        Job/step wiring, batch properties, daily pipeline composition (JobStep)
   domain/        JPA entities
   repository/    Spring Data repositories
   web/           REST controller, exception handling, DTOs
@@ -185,19 +217,21 @@ src/main/java/com/batch/demo/
 The integration suite exercises the fault-tolerance and operational-control behavior end-to-end, not just the happy path:
 
 - **Skip path** — malformed/invalid rows are actually skipped, valid ones still processed, and `rejected-rows.csv` gets the right entries (`IngestLineItemsSkipPathTest`); exceeding `batch.skip-limit` genuinely fails the step (`IngestLineItemsSkipLimitExceededTest`).
-- **Retry, simulated and real** — the demo's simulated transient failure recovers via retry (`BuildInvoicesRetrySuccessTest`), and so does a *real*, correctly-classified DB connection failure, injected via an in-process `DataSource` proxy that matches specific SQL statements (`BuildInvoicesDbConnectionRetryTest`, `IngestLineItemsDbConnectionRetryTest`).
+- **Retry, simulated and real** — the demo's simulated transient failure recovers via retry (`BuildInvoicesRetrySuccessTest`), and so does a _real_, correctly-classified DB connection failure, injected via an in-process `DataSource` proxy that matches specific SQL statements (`BuildInvoicesDbConnectionRetryTest`, `IngestLineItemsDbConnectionRetryTest`).
 - **Failure + restart** — a genuine mid-step failure (via the same fault-injection technique) followed by `POST .../restart` resumes cleanly with no duplicated or lost rows, for both steps (`OrderProcessingJobFailureRestartTest`, `IngestLineItemsRestartTest`).
 - **Idempotency** — a same-day relaunch is rejected (`409`), and a relaunch on a different business date against the same input doesn't duplicate any rows (`OrderProcessingJobIdempotencyTest`).
 - **Operational control** — `stop` genuinely interrupts a running job and `abandon` transitions a stopped execution correctly (`JobControlOperationsTest`).
 - **Real parallelism** — every other test pins `batch.partition-grid-size=1` for determinism; `PartitionedProcessingTest` raises it back up to verify multi-partition runs merge correctly with nothing dropped or duplicated across partition boundaries.
+- **Job composition** — the daily pipeline runs both nested jobs and produces a correct report (`DailyPipelineJobTest`), a same-day relaunch and cross-endpoint conflict both fail as expected (`DailyPipelineJobIdempotencyTest`), and a failure in the report job followed by restart resumes only that nested job — proven by inspecting nested `JobInstance`/`JobExecution` counts before and after, not just the top-level status (`DailyPipelineJobRestartTest`).
 - **Tracing** — every partition of both worker steps produces per-chunk spans, and they all share one trace instead of starting disconnected ones — proof the trace context actually survives the hop onto `batchTaskExecutor`'s worker threads (`ChunkTracingSpansTest`); actuator requests produce no spans while real application requests still do (`ActuatorObservationExclusionTest`).
 
 ## Known limitations (demo scope)
 
 - No schema migration tool (Flyway/Liquibase) — `spring.jpa.hibernate.ddl-auto=update`.
-- The row-level dedup key (`orderId` + `productId`) assumes an order has at most one line item per product; it also detects and drops exact re-deliveries but doesn't reconcile *corrections* — a resend with a different quantity/price is treated as a duplicate and silently dropped, the original wins.
+- The row-level dedup key (`orderId` + `productId`) assumes an order has at most one line item per product; it also detects and drops exact re-deliveries but doesn't reconcile _corrections_ — a resend with a different quantity/price is treated as a duplicate and silently dropped, the original wins.
 - Grafana runs with anonymous viewer access and default credentials — fine for local use, not for anything internet-facing.
 - Actuator endpoints are unauthenticated.
 - Tracing samples every job execution (`management.tracing.sampling.probability=1.0`) — a real deployment would sample a small fraction instead.
+- The daily sales report is keyed by `businessDate`, but invoices are always stamped with the wall-clock date — so a `businessDate` override on `/daily-pipeline` produces an empty report rather than reflecting the actual data processed.
 
 See `CLAUDE.md` for a deeper architectural walkthrough, including the specific Spring Batch 6.0 package-relocation gotchas and design rationale for each major decision.
