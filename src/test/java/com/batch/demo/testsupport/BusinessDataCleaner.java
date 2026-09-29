@@ -15,7 +15,8 @@ public final class BusinessDataCleaner {
      * same identifying parameters (businessDate + inputFile).
      */
     public static void truncateAll(JdbcTemplate jdbc) {
-        jdbc.execute("TRUNCATE TABLE invoice, order_line_item, orders, order_line_item_staging RESTART IDENTITY CASCADE");
+        jdbc.execute("TRUNCATE TABLE invoice, order_line_item, orders, order_line_item_staging, "
+                + "daily_sales_report RESTART IDENTITY CASCADE");
         jdbc.execute("TRUNCATE TABLE batch_job_execution_context, batch_step_execution_context, "
                 + "batch_step_execution, batch_job_execution_params, batch_job_execution, batch_job_instance "
                 + "RESTART IDENTITY CASCADE");

@@ -6,8 +6,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import org.springframework.batch.core.configuration.JobRegistry;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.EnableJdbcJobRepository;
+import org.springframework.batch.core.configuration.support.MapJobRegistry;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.listener.JobExecutionListener;
@@ -17,6 +19,7 @@ import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.support.ContextPropagatingTaskDecorator;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -83,6 +86,37 @@ public class BatchJobConfig {
         return threadPoolExecutor;
     }
 
+    /**
+     * DefaultBatchConfiguration only auto-populates a JobRegistry the first time
+     * something (here, its own JobOperator bean) asks for one - via
+     * {@code applicationContext.getBeansOfType(Job.class)} taken as a ONE-SHOT
+     * snapshot at that exact moment (confirmed by decompiling
+     * DefaultBatchConfiguration.getJobRegistry()), not a live view. That snapshot
+     * structurally can never include dailyPipelineJob or dailySalesReportJob (see
+     * DailyPipelineJobConfig): both depend on a JobStep, which depends on JobOperator
+     * itself, so by definition neither Job bean can exist yet at the moment
+     * JobOperator's own creation takes that snapshot. Confirmed the hard way:
+     * JobControlService.restart(...) against a dailyPipelineJob execution threw
+     * "IllegalArgumentException: The Job must not be null" from deep inside
+     * SimpleJobOperator.restart(), because jobRegistry.getJob("dailyPipelineJob")
+     * silently found nothing.
+     *
+     * The fix is only this one bean: once a JobRegistry bean exists,
+     * DefaultBatchConfiguration's {@code getIfAvailable(...)} call uses it directly
+     * instead of auto-populating its own, AND Spring Boot's own batch autoconfiguration
+     * separately supplies a JobRegistrySmartInitializingSingleton that discovers this
+     * bean by type and populates it once every singleton in the context - including
+     * dailyPipelineJob - has finished being created, sidestepping the ordering problem
+     * entirely. Do NOT also declare a JobRegistrySmartInitializingSingleton bean here:
+     * confirmed the hard way that doing so registers every Job bean a second time,
+     * against the same registry, throwing DuplicateJobException at startup - Boot
+     * already provides one.
+     */
+    @Bean
+    public JobRegistry jobRegistry() {
+        return new MapJobRegistry();
+    }
+
     @Bean
     public JobExecutionListener perRunStateResetListener(RejectedRecordSink rejectedRecordSink,
                                                            FlakyOrderPersistenceSimulator flakySimulator,
@@ -117,7 +151,18 @@ public class BatchJobConfig {
         };
     }
 
+    /**
+     * {@code @Primary} matters once {@code dailyPipelineJob}/{@code dailySalesReportJob}
+     * (see DailyPipelineJobConfig) add more {@link Job} beans to the context: every
+     * integration test's {@code @SpringBatchTest}-provided {@code JobLauncherTestUtils}
+     * gets its job field populated via {@code ObjectProvider.ifUnique(...)} (confirmed
+     * via javap on BatchTestContextBeanPostProcessor), which silently leaves the field
+     * null - no exception - the moment there's more than one non-primary {@link Job}
+     * candidate. Without this annotation, every existing test calling
+     * {@code jobLauncherTestUtils.launchJob(...)} would NPE.
+     */
     @Bean
+    @Primary
     public Job orderProcessingJob(JobRepository jobRepository,
                                    Step ingestLineItemsStep,
                                    Step buildInvoicesStep,
