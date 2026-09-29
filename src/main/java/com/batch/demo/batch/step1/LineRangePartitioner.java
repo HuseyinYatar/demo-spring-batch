@@ -11,9 +11,8 @@ import java.util.Map;
 import org.springframework.batch.core.partition.Partitioner;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.ResourceLoader;
 
-import com.batch.demo.config.BatchProperties;
+import lombok.RequiredArgsConstructor;
 
 /**
  * Splits the CSV's data rows (everything after the header) into gridSize
@@ -21,13 +20,10 @@ import com.batch.demo.config.BatchProperties;
  * orderLineItemReader uses linesToSkip/maxItemCount to read only its own
  * range - see IngestLineItemsStepConfig.
  */
+@RequiredArgsConstructor
 public class LineRangePartitioner implements Partitioner {
 
     private final Resource csvResource;
-
-    public LineRangePartitioner(BatchProperties properties, ResourceLoader resourceLoader) {
-        this.csvResource = resourceLoader.getResource(properties.getInputCsvPath());
-    }
 
     @Override
     public Map<String, ExecutionContext> partition(int gridSize) {

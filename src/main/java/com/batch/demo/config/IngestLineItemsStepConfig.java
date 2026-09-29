@@ -1,5 +1,6 @@
 package com.batch.demo.config;
 
+import org.springframework.batch.core.configuration.annotation.JobScope;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.repository.JobRepository;
@@ -38,14 +39,14 @@ public class IngestLineItemsStepConfig {
     @Bean
     @StepScope
     public FlatFileItemReader<OrderLineCsvRecord> orderLineItemReader(
-            BatchProperties properties,
             ResourceLoader resourceLoader,
             OrderLineFieldSetMapper fieldSetMapper,
+            @Value("#{jobParameters['inputFile']}") String inputFile,
             @Value("#{stepExecutionContext['linesToSkip']}") Integer linesToSkip,
             @Value("#{stepExecutionContext['maxItemCount']}") Integer maxItemCount) {
         return new FlatFileItemReaderBuilder<OrderLineCsvRecord>()
                 .name("orderLineItemReader")
-                .resource(resourceLoader.getResource(properties.getInputCsvPath()))
+                .resource(resourceLoader.getResource(inputFile))
                 .linesToSkip(linesToSkip)
                 .maxItemCount(maxItemCount)
                 .delimited()
@@ -64,8 +65,11 @@ public class IngestLineItemsStepConfig {
     }
 
     @Bean
-    public LineRangePartitioner lineRangePartitioner(BatchProperties properties, ResourceLoader resourceLoader) {
-        return new LineRangePartitioner(properties, resourceLoader);
+    @JobScope
+    public LineRangePartitioner lineRangePartitioner(
+            ResourceLoader resourceLoader,
+            @Value("#{jobParameters['inputFile']}") String inputFile) {
+        return new LineRangePartitioner(resourceLoader.getResource(inputFile));
     }
 
     @Bean
