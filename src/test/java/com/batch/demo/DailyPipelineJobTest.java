@@ -38,11 +38,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * OrderProcessingJobIdempotencyTest for the same counts), and the report reflects
  * exactly that data.
  *
- * No businessDate override is used here deliberately: InvoiceCalculator stamps
- * Invoice.issuedDate with LocalDate.now(), not the businessDate JobParameter (a
- * pre-existing characteristic of InvoiceCalculator, unrelated to this feature - see
- * CLAUDE.md), so dailySalesReportJob's issuedDate filter only lines up with real data
- * for a same-day run.
+ * No businessDate override is used here since it's not needed for a same-day run -
+ * InvoiceCalculator now stamps Invoice.issuedDate from the businessDate JobParameter
+ * itself (see InvoiceAggregationProcessor/BuildInvoicesStepConfig), so this would pass
+ * with an overridden businessDate too, unlike before that fix.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureMockMvc

@@ -3,6 +3,7 @@ package com.batch.demo.batch.step2;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 import org.junit.jupiter.api.Test;
 
@@ -24,11 +25,13 @@ class InvoiceCalculatorTest {
         order.addLineItem(OrderLineItem.builder().lineTotal(new BigDecimal("1598.00")).build());
         order.addLineItem(OrderLineItem.builder().lineTotal(new BigDecimal("597.00")).build());
 
-        Invoice invoice = calculator.calculate(order);
+        LocalDate issuedDate = LocalDate.of(2026, 1, 15);
+        Invoice invoice = calculator.calculate(order, issuedDate);
 
         assertThat(invoice.getSubtotal()).isEqualByComparingTo("2195.00");
         assertThat(invoice.getTaxAmount()).isEqualByComparingTo("395.10");
         assertThat(invoice.getTotalAmount()).isEqualByComparingTo("2590.10");
         assertThat(invoice.getInvoiceNumber()).isEqualTo("INV-ORD-1001");
+        assertThat(invoice.getIssuedDate()).isEqualTo(issuedDate);
     }
 }
