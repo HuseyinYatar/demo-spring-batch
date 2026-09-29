@@ -2,9 +2,12 @@ package com.batch.demo.batch.step2;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.List;
 
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.infrastructure.item.ItemProcessor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.batch.demo.batch.dto.OrderInvoiceResult;
@@ -22,14 +25,25 @@ import lombok.RequiredArgsConstructor;
  * Returns null (Spring Batch filters nulls) when the order was already invoiced in a
  * prior run, or when no unprocessed staging rows remain for it - this keeps the job
  * safe to re-trigger without needing skip/exception machinery.
+ *
+ * @StepScope (not a plain singleton) so businessDate can be late-bound from the run's
+ * JobParameters - stamped onto each Invoice as issuedDate so it lines up with
+ * dailySalesReportJob's issuedDate filter regardless of when the job physically runs.
+ * The generated constructor picks up @Value here because lombok.config's
+ * copyableAnnotations copies it from the field onto the parameter - without that,
+ * @RequiredArgsConstructor would silently drop it and Spring would try (and fail) to
+ * inject a LocalDate bean by type instead.
  */
 @Component
+@StepScope
 @RequiredArgsConstructor
 public class InvoiceAggregationProcessor implements ItemProcessor<String, OrderInvoiceResult> {
 
     private final OrderLineItemStagingRepository stagingRepository;
     private final OrderRepository orderRepository;
     private final InvoiceCalculator invoiceCalculator;
+    @Value("#{jobParameters['businessDate']}")
+    private final LocalDate businessDate;
 
     @Override
     public OrderInvoiceResult process(String orderId) {
@@ -43,7 +57,7 @@ public class InvoiceAggregationProcessor implements ItemProcessor<String, OrderI
         }
 
         Order order = buildOrder(orderId, stagedLines);
-        order.setInvoice(invoiceCalculator.calculate(order));
+        order.setInvoice(invoiceCalculator.calculate(order, businessDate));
         order.getInvoice().setOrder(order);
         order.setStatus(OrderStatus.INVOICED);
 
