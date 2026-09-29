@@ -22,4 +22,6 @@ public class BatchProperties {
     private boolean simulateTransientWriteFailures = true;
     private int partitionGridSize = 6;
     private int orderIdPageSize = 500;
+    private String dailySalesReportOutputDir = "daily-sales-reports";
+    private int reportTopCustomerCount = 3;
 }
