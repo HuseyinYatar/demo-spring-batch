@@ -157,6 +157,12 @@ A `@Bean @StepScope` method that returns the `ItemReader<T>` interface type caus
 
 Both retries reuse `batch.retry-limit`; `IngestRetryListener`/`InvoiceWriteRetryListener` log each attempt. Neither is registered as skippable, for the same silent-audit-trail reason as `TransientInvoiceWriteException` above.
 
+### Retries back off exponentially, with jitter
+
+Every retry in both worker steps waits before the next attempt, via one shared `BackOffPolicy` bean (`retryBackOffPolicy`, `config/RetryBackOffConfig`) passed to `.backOffPolicy(...)` on `ingestLineItemsWorkerStep` and `buildInvoicesWorkerStep` (confirmed via `javap`: `FaultTolerantStepBuilder.backOffPolicy(org.springframework.retry.backoff.BackOffPolicy)` - spring-retry's type, not Spring Framework 7's `core.retry`). It is an `ExponentialRandomBackOffPolicy`, not the plain `ExponentialBackOffPolicy`, on purpose: partitions run concurrently, so one DB blip fails several at once, and without jitter they would all retry in lockstep against a database that is still recovering. Tuned via `batch.retry-backoff-initial-interval-ms` (500), `batch.retry-backoff-multiplier` (2.0) and `batch.retry-backoff-max-interval-ms` (10000); `application-test.properties` shrinks these to 10-50 ms so the retry tests don't sleep for real.
+
+The actual (jittered) wait is logged as `Backing off N ms before retrying` by a `LoggingSleeper` set on the policy via `setSleeper(...)`, not by `IngestRetryListener`/`InvoiceWriteRetryListener`: a `RetryListener.onError` runs *before* the policy picks the interval, so the sleeper is the only place the real value is visible. It appears right after the listener's own WARN line, in the same partition thread.
+
 ### Both steps run partitioned, not single-threaded
 
 `ingestLineItemsStep` and `buildInvoicesStep` are each a manager `Step` built via `.partitioner(workerStepName, partitioner).step(workerStep).taskExecutor(batchTaskExecutor).gridSize(properties.getPartitionGridSize())` (confirmed via `javap`: `Partitioner`/`PartitionHandler`/`TaskExecutorPartitionHandler` live under `org.springframework.batch.core.partition(.support)`, not relocated like `Job`/`Step`/`JobExplorer` were). The actual chunk-processing steps are `ingestLineItemsWorkerStep`/`buildInvoicesWorkerStep`; the job's own wiring in `BatchJobConfig` is unchanged since the manager steps keep the original `ingestLineItemsStep`/`buildInvoicesStep` bean names. A shared `batchTaskExecutor` bean (`ThreadPoolTaskExecutor`, sized off `batch.partition-grid-size`, default 6) runs both — `TaskExecutorPartitionHandler` has no useful default executor, so omitting `.taskExecutor(...)` would silently run partitions sequentially. Raising `batch.partition-grid-size` resizes the thread pool automatically (same property), but not the DB connection pool — HikariCP's default max is 10, and each partition holds a connection for the duration of its chunk, so pushing grid size much past that would start serializing partitions on connection waits rather than actually running them in parallel; `spring.datasource.hikari.maximum-pool-size` would need to move too at that point.
@@ -213,7 +219,7 @@ Two layers guard against duplicate work on re-trigger:
 
 ### Config properties (`batch.*` prefix, `config/BatchProperties`)
 
-`inputCsvPath`, `rejectsFilePath`, `invoiceSummaryOutputPath`, `taxRate`, `chunkSize`, `skipLimit`, `retryLimit`, `simulateTransientWriteFailures`, `partitionGridSize`, `orderIdPageSize`, `dailySalesReportOutputDir`, `reportTopCustomerCount` — bound via `@ConfigurationProperties`, registered with `@EnableConfigurationProperties(BatchProperties.class)` on `DemoApplication`.
+`inputCsvPath`, `rejectsFilePath`, `invoiceSummaryOutputPath`, `taxRate`, `chunkSize`, `skipLimit`, `retryLimit`, `retryBackoffInitialIntervalMs`, `retryBackoffMultiplier`, `retryBackoffMaxIntervalMs`, `simulateTransientWriteFailures`, `partitionGridSize`, `orderIdPageSize`, `dailySalesReportOutputDir`, `reportTopCustomerCount` — bound via `@ConfigurationProperties`, registered with `@EnableConfigurationProperties(BatchProperties.class)` on `DemoApplication`.
 
 ### Demo-only shortcuts (would not survive contact with production)
 
