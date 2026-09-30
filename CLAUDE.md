@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
+`README.md` is the user-facing overview (quickstart, REST table, project structure, test list, known limitations). This file holds the non-obvious "why" and the traps; when they overlap, update both or keep the detail here and link from the README.
+
 A Spring Batch demo: "Daily E-commerce Order & Invoice Processing". Ingests a CSV of order line items, validates and aggregates them into invoices, persists results to PostgreSQL, writes a CSV summary, and demonstrates a real skip-and-log error-handling path (not a happy-path-only toy).
 
 Stack: Spring Boot 4.1.1 (Java 21), Spring Batch (bundled Spring Batch 6.0.5), Spring Data JPA / Hibernate, Spring Web, Spring Boot Actuator + Micrometer (Prometheus registry, Tracing/OpenTelemetry), Lombok, PostgreSQL, Prometheus, Grafana, Tempo.
@@ -39,6 +41,10 @@ There is no separate lint step; Lombok annotation processing runs as part of `co
 
 `DemoApplicationTests` (`@SpringBootTest`) loads the full application context and therefore requires Postgres to be running (`docker compose up -d` first) — it will fail otherwise. `DefaultOrderLineValidatorTest` and `InvoiceCalculatorTest` are plain unit tests with no Spring context / DB dependency.
 
+**New integration tests must extend `AbstractPostgresIntegrationTest`, and its `@DirtiesContext(AFTER_CLASS)` must stay.** The container is a per-subclass static field, but Spring caches contexts by configuration — without `@DirtiesContext`, two classes with identical config would share one cached context still bound to the first class's (already stopped) container and fail with "Connection refused".
+
+`src/test/resources/application-test.properties` shrinks the run for speed (`chunk-size=2`, `partition-grid-size=1`, `simulate-transient-write-failures=false`, ms-scale retry backoff) and points input/output at a small test CSV and `java.io.tmpdir`. Tests that need real partitioning or the simulated retry override these. Failure-path tests inject faults through a wrapped `DataSource` (`testsupport/fault/`, `testsupport/slow/`) rather than mocking the writers. The full test list and project layout are in `README.md` ("Project structure", "Testing"); this file covers only what isn't obvious from the code.
+
 ### Triggering the job manually
 
 ```bash
@@ -49,6 +55,11 @@ curl http://localhost:8080/api/batch/jobs/executions/{id}
 # explicit businessDate to get a fresh JobInstance without waiting a day or
 # touching the DB:
 curl -X POST "http://localhost:8080/api/batch/jobs/order-processing?businessDate=2099-01-01"
+
+# Composed run: orderProcessingJob followed by dailySalesReportJob (see "Job composition" below).
+# Same businessDate param. Caveat: Invoice.issuedDate is always LocalDate.now(), so a
+# businessDate override makes the daily report come back with invoiceCount = 0.
+curl -X POST http://localhost:8080/api/batch/jobs/daily-pipeline
 
 # Operational control (JobOperator - see Architecture below)
 curl -X POST http://localhost:8080/api/batch/jobs/executions/{id}/stop
@@ -72,7 +83,17 @@ curl http://localhost:8080/actuator/prometheus           # spring_batch_job_seco
   - "Batch Job & Step Executions" — every `JobExecution`/`StepExecution` row, queried directly from Postgres (not Prometheus — see Architecture below for why that distinction matters).
   - "Batch Metrics (Prometheus)" — job/step duration trends, queried from Prometheus.
 - **Prometheus** (`http://localhost:9090`) — actually scrapes `/actuator/prometheus` every 15s (the endpoint alone, from the Actuator addition, was inert until this existed). Since the app runs on the Windows host, not in `docker-compose`, the scrape target in `prometheus/prometheus.yml` is `host.docker.internal:8080`, not `localhost:8080` — confirmed reachable via Docker Desktop's built-in host DNS. Check `http://localhost:9090/targets` if metrics ever look stale.
-- **Tempo** (queried through Grafana's "Tempo" datasource, not its own UI — Tempo has none; the OTLP receiver itself listens on `localhost:4317`/`4318`) — every job run's spans, including per-chunk spans within each partition (see Architecture below for why those needed manual instrumentation, unlike job/step metrics).
+- **Tempo** (queried through Grafana's "Tempo" datasource, not its own UI — Tempo has none; query API on `localhost:3200`, OTLP receiver on `localhost:4317` gRPC / `4318` HTTP) — every job run's spans, including per-chunk spans within each partition (see Architecture below for why those needed manual instrumentation, unlike job/step metrics).
+
+## Gotchas checklist (details in the sections below)
+
+- `@Bean @StepScope` readers/writers: return the **concrete class**, not `ItemReader<T>`/`ItemWriter<T>` — otherwise `open()`/`close()` never run and the step silently processes nothing.
+- Multiple `Job` beans exist and `orderProcessingJob` is `@Primary`: every other `Job`-typed injection point needs an explicit `@Qualifier`, and Lombok's `@RequiredArgsConstructor` does not copy it onto the constructor parameter (hand-write the constructor).
+- Retry exception types differ per step: `buildInvoicesWorkerStep` sees Spring `DataAccessException`s (Spring Data translates), `ingestLineItemsWorkerStep` sees raw Hibernate `JDBCConnectionException` (`JpaItemWriter` doesn't translate). Registering the wrong family compiles and silently never matches.
+- New per-run file/state (output files, simulators) must be reset in `perRunStateResetListener` (`BatchJobConfig`), guarded by the fresh-`JobInstance` check so a restart doesn't delete files a resuming writer expects.
+- A new `ThreadPoolTaskExecutor` bean gets no trace-context propagation or metrics for free: set `ContextPropagatingTaskDecorator` and bind metrics through a separate `@Bean` (Micrometer gauges hold weak references → `NaN` otherwise).
+- Anything that runs once per `StepExecution` (`open()`/`close()`) must be `@StepScope` with a per-partition path if it can run under partitioning.
+- Never call `.skip(...)` for transient DB failures — a skip in the worker steps' invoice path leaves no audit trail. Retry, then fail loudly.
 
 ## Architecture
 
@@ -102,7 +123,7 @@ Confirmed live, the hard way: calling `ExecutorServiceMetrics.monitor(...)` inli
 
 ### Grafana visualizes execution history via a Postgres datasource, not Prometheus
 
-Prometheus only holds aggregated counters/timers — it can tell you "`buildInvoicesStep` has run 3 times, total 2 seconds," never "here is execution #11, which ran at 13:24 and completed in 0.55s." Row-level execution history already exists in `BATCH_JOB_EXECUTION`/`BATCH_STEP_EXECUTION` (written by the JDBC job repository, see above), so `grafana/provisioning/datasources/postgres.yml` points Grafana directly at Postgres via a SQL datasource (`uid: batchdemo-postgres`) instead. `grafana/dashboards/batch-executions.json` (auto-loaded via `grafana/provisioning/dashboards/dashboards.yml`) queries those tables directly with raw SQL table panels — no new metrics, no code changes, same "existing data, new way to look at it" pattern as the Actuator addition. The Step Executions panel's `Rollbacks` column is a nice side effect: it's the direct fingerprint of the retry policy (`buildInvoicesStep` rows always show `rollback_count=1`, one simulated failure + recovery per run) and of the skip policy in step 1 (`ingestLineItemsStep` rows show `rollback_count` from the chunk-scan-and-skip recovery, alongside `Skips=6`).
+Prometheus only holds aggregated counters/timers — it can tell you "`buildInvoicesStep` has run 3 times, total 2 seconds," never "here is execution #11, which ran at 13:24 and completed in 0.55s." Row-level execution history already exists in `BATCH_JOB_EXECUTION`/`BATCH_STEP_EXECUTION` (written by the JDBC job repository, see above), so `grafana/provisioning/datasources/postgres.yml` points Grafana directly at Postgres via a SQL datasource (`uid: batchdemo-postgres`) instead. `grafana/dashboards/batch-executions.json` (auto-loaded via `grafana/provisioning/dashboards/dashboards.yml`) queries those tables directly with raw SQL table panels — no new metrics, no code changes, same "existing data, new way to look at it" pattern as the Actuator addition. The Step Executions panel's `Rollbacks` column is a nice side effect: it's the direct fingerprint of the retry policy (`buildInvoicesStep` rows always show `rollback_count=1`, one simulated failure + recovery per run) and of the skip policy in step 1 (`ingestLineItemsStep` rows show `rollback_count` from the chunk-scan-and-skip recovery, alongside a non-zero `Skips` count, one per deliberately-bad CSV row that was actually read).
 
 ### The Prometheus trend dashboard, and a Micrometer gotcha worth knowing
 
@@ -132,7 +153,7 @@ Boot's `ServerHttpObservationFilter` (`WebMvcObservationAutoConfiguration`) obse
 
 A `@Bean @StepScope` method that returns the `ItemReader<T>` interface type causes the framework to never invoke `open()`/`close()` on it (Spring Batch logs a warning about this: "If using @StepScope on a @Bean method, be sure to return the implementing class"). Since `DistinctOrderIdItemReader` (see below) holds iteration state that's only populated in `open()`, getting this wrong makes the step silently process zero items with no error. Always declare the `@Bean` method's return type as the concrete class (see `BuildInvoicesStepConfig.distinctOrderIdItemReader`).
 
-### Job design: two steps, staging table in between
+### Job design: three steps, staging table in between
 
 `orderProcessingJob` = `ingestLineItemsStep` → `buildInvoicesStep` → `mergeInvoiceSummaryStep` (the last one just recombines partitioned output — see "Both steps run partitioned" below). A single-step "aggregate consecutive CSV rows into one order" reader was deliberately avoided because it would require assuming the CSV is pre-sorted by `orderId` and would complicate per-item skip semantics.
 
@@ -180,7 +201,7 @@ Partitioning (not a multi-threaded step) was chosen deliberately: neither `FlatF
 
 `launch()` in `BatchJobController` identifies each `JobInstance` by `businessDate` + `inputFile` `JobParameters` (see Idempotency below) rather than a random value, so it can't be used to resume a stopped or failed run — a second `launch()` call against an already-completed instance is rejected, it doesn't start a fresh one. `org.springframework.batch.core.launch.JobOperator` (package `core.launch`, confirmed via `javap`) fills that gap and is **already an available bean with zero extra config** — it's provided by `DefaultBatchConfiguration`, the machinery backing `@EnableBatchProcessing`, which `BatchJobConfig` already declares. `restart(executionId)` looks up the *original* failed/stopped execution's own `JobParameters` internally, which is why restart works correctly despite `launch()` always minting new ones — no parameter bookkeeping needed on the caller's side. `orderProcessingJob` never calls `.preventRestart()`, so it's restartable by default.
 
-`JobControlService` (`batch/control/`) wraps `JobOperator` + `JobExplorer` behind three methods (`stop`, `restart`, `abandon`), each returning the existing `JobExecutionStatusResponse` DTO — re-fetching via `JobExplorer` after `stop`/`restart` since those return only a `boolean`/new execution id, not the execution itself (`abandon` returns the `JobExecution` directly). `BatchJobController`'s three new endpoints stay pure delegates, matching the existing thin-controller pattern. `BatchOperationExceptionHandler` (`web/`, `@RestControllerAdvice`) maps `JobOperator`'s checked exceptions to HTTP status codes instead of letting them fall through to a raw 500: `NoSuchJobExecutionException`/`NoSuchJobException` → 404, `JobExecutionAlreadyRunningException`/`JobExecutionNotRunningException`/`JobInstanceAlreadyCompleteException`/`JobRestartException`/`InvalidJobParametersException` → 409. Kept as a separate class (rather than local `@ExceptionHandler` methods on the controller) so the controller doesn't have to know about Batch's exception hierarchy at all.
+`JobControlService` (`batch/control/`) wraps `JobOperator` + `JobExplorer` behind three methods (`stop`, `restart`, `abandon`), each returning the existing `JobExecutionStatusResponse` DTO — re-fetching via `JobExplorer` after `stop`/`restart` since those return only a `boolean`/new execution id, not the execution itself (`abandon` returns the `JobExecution` directly). `BatchJobController`'s three new endpoints stay pure delegates, matching the existing thin-controller pattern. `BatchOperationExceptionHandler` (`web/`, `@RestControllerAdvice`) maps `JobOperator`'s checked exceptions to HTTP status codes instead of letting them fall through to a raw 500: `NoSuchJobExecutionException`/`NoSuchJobException`/`EmptyResultDataAccessException` → 404, `JobExecutionAlreadyRunningException`/`JobExecutionNotRunningException`/`JobInstanceAlreadyCompleteException`/`JobRestartException`/`InvalidJobParametersException` → 409. Kept as a separate class (rather than local `@ExceptionHandler` methods on the controller) so the controller doesn't have to know about Batch's exception hierarchy at all.
 
 If a restart ends up re-running `ingestLineItemsStep` mid-flight (rather than just resuming the already-completed `buildInvoicesStep`), the staging-table dedup check noted below under Idempotency applies here too — a restart won't re-insert lines already staged from the failed attempt.
 
