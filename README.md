@@ -120,7 +120,7 @@ flowchart LR
 - Launched via `POST /api/batch/jobs/daily-pipeline`, same `businessDate`/`inputFile` parameter shape as `/order-processing`.
 - **Restart resumes correctly at the job level, not just the step level**: if the report job fails after order processing already completed, `POST .../restart` re-runs only the failed nested job — the already-completed `orderProcessingJob` execution is left untouched, exactly like a normal step restart.
 - A quirk worth knowing: calling `/daily-pipeline` for a `businessDate` already covered by a standalone `/order-processing` run doesn't `409` the way two `/order-processing` calls would — the orchestrator's own instance is new, but the nested order-processing attempt inside it fails, so the response is `200` with `"status": "FAILED"` in the body.
-- The report's `issuedDate` filter is keyed off `businessDate`, but invoices themselves are always stamped with the wall-clock date — so, like `/order-processing`, this is meant to be run same-day; a `businessDate` override (used to dodge a same-day conflict) produces an empty report rather than an error.
+- The report's `issuedDate` filter is keyed off `businessDate`, and invoices themselves are now stamped with that same `businessDate` too — so a `businessDate` override (e.g. to dodge a same-day conflict) still produces a correct, non-empty report for that date, not just for a same-day run.
 
 See `CLAUDE.md` for the full mechanics (`JobOperator` vs. `JobLauncher` inside `JobStep`, the `@Primary`/`JobRegistry` wiring this required, and what's actually verified by `DailyPipelineJobRestartTest`).
 
@@ -242,6 +242,5 @@ The integration suite exercises the fault-tolerance and operational-control beha
 - Grafana runs with anonymous viewer access and default credentials — fine for local use, not for anything internet-facing.
 - Actuator endpoints are unauthenticated.
 - Tracing samples every job execution (`management.tracing.sampling.probability=1.0`) — a real deployment would sample a small fraction instead.
-- The daily sales report is keyed by `businessDate`, but invoices are always stamped with the wall-clock date — so a `businessDate` override on `/daily-pipeline` produces an empty report rather than reflecting the actual data processed.
 
 See `CLAUDE.md` for a deeper architectural walkthrough, including the specific Spring Batch 6.0 package-relocation gotchas and design rationale for each major decision.

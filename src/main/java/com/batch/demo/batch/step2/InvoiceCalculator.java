@@ -24,7 +24,7 @@ public class InvoiceCalculator {
         this.taxRate = properties.getTaxRate();
     }
 
-    public Invoice calculate(Order order) {
+    public Invoice calculate(Order order, LocalDate issuedDate) {
         BigDecimal subtotal = order.getLineItems().stream()
                 .map(OrderLineItem::getLineTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
@@ -38,7 +38,7 @@ public class InvoiceCalculator {
                 .subtotal(subtotal)
                 .taxAmount(tax)
                 .totalAmount(total)
-                .issuedDate(LocalDate.now())
+                .issuedDate(issuedDate)
                 .build();
     }
 }
