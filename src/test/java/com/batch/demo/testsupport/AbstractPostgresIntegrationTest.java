@@ -9,8 +9,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * Each concrete subclass gets its own, independently-started container (POSTGRES is a
  * static field on the abstract class, so per-subclass, not shared) - a fresh, disposable
- * Postgres per test class, isolated from the manually-managed docker-compose instance
- * DemoApplicationTests depends on and from every other test class.
+ * Postgres per test class, isolated from the docker-compose dev instance and from every
+ * other test class.
  * <p>
  * {@code @DirtiesContext} is required because of that: Spring caches contexts by
  * configuration, so two classes with identical config would otherwise share one cached
