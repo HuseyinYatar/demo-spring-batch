@@ -18,6 +18,7 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.TransientDataAccessException;
+import org.springframework.retry.backoff.BackOffPolicy;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.batch.demo.batch.dto.OrderInvoiceResult;
@@ -95,6 +96,7 @@ public class BuildInvoicesStepConfig {
                                          ItemProcessor<String, OrderInvoiceResult> invoiceAggregationProcessor,
                                          ItemWriter<OrderInvoiceResult> invoiceCompositeItemWriter,
                                          InvoiceWriteRetryListener invoiceWriteRetryListener,
+                                         BackOffPolicy retryBackOffPolicy,
                                          ChunkTracingListener chunkTracingListener) {
         return new StepBuilder("buildInvoicesWorkerStep", jobRepository)
                 .<String, OrderInvoiceResult>chunk(properties.getChunkSize(), transactionManager)
@@ -109,6 +111,7 @@ public class BuildInvoicesStepConfig {
                 .retry(TransientDataAccessException.class)
                 .retry(DataAccessResourceFailureException.class)
                 .retryLimit(properties.getRetryLimit())
+                .backOffPolicy(retryBackOffPolicy)
                 .listener(invoiceWriteRetryListener)
                 .listener(chunkTracingListener)
                 .build();

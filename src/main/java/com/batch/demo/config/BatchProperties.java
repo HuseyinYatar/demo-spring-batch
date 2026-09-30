@@ -19,6 +19,9 @@ public class BatchProperties {
     private int chunkSize =100;
     private int skipLimit = 20;
     private int retryLimit = 3;
+    private long retryBackoffInitialIntervalMs = 500;
+    private double retryBackoffMultiplier = 2.0;
+    private long retryBackoffMaxIntervalMs = 10_000;
     private boolean simulateTransientWriteFailures = true;
     private int partitionGridSize = 6;
     private int orderIdPageSize = 500;
