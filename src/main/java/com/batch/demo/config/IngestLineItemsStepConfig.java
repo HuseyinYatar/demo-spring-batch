@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.retry.backoff.BackOffPolicy;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import org.hibernate.exception.JDBCConnectionException;
@@ -75,6 +76,7 @@ public class IngestLineItemsStepConfig {
                                            ItemWriter<OrderLineItemStaging> orderLineItemStagingWriter,
                                            RejectedRecordSkipListener rejectedRecordSkipListener,
                                            IngestRetryListener ingestRetryListener,
+                                           BackOffPolicy retryBackOffPolicy,
                                            ChunkTracingListener chunkTracingListener) {
         return new StepBuilder("ingestLineItemsWorkerStep", jobRepository)
                 .<OrderLineCsvRecord, OrderLineItemStaging>chunk(properties.getChunkSize(), transactionManager)
@@ -102,6 +104,7 @@ public class IngestLineItemsStepConfig {
                 // stack trace, not assumed).
                 .retry(JDBCConnectionException.class)
                 .retryLimit(properties.getRetryLimit())
+                .backOffPolicy(retryBackOffPolicy)
                 .listener(ingestRetryListener)
                 .build();
     }
