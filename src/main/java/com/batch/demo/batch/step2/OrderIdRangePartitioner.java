@@ -10,10 +10,11 @@ import org.springframework.batch.infrastructure.item.ExecutionContext;
 import com.batch.demo.repository.OrderLineItemStagingRepository;
 
 /**
- * Splits the sorted list of distinct unprocessed order ids into gridSize
- * contiguous, non-overlapping ranges. Range-based rather than hash-based so
- * every order is guaranteed to land in exactly one partition regardless of
- * insertion order - see DistinctOrderIdItemReader.
+ * Splits the sorted distinct unprocessed order ids into gridSize contiguous,
+ * non-overlapping ranges. Range-based rather than hash-based so every order is
+ * guaranteed to land in exactly one partition regardless of insertion order -
+ * see DistinctOrderIdItemReader. The database computes the range boundaries
+ * (ntile), so the ids themselves are never loaded into memory here.
  */
 public class OrderIdRangePartitioner implements Partitioner {
 
@@ -25,21 +26,17 @@ public class OrderIdRangePartitioner implements Partitioner {
 
     @Override
     public Map<String, ExecutionContext> partition(int gridSize) {
-        List<String> orderIds = stagingRepository.findDistinctUnprocessedOrderIds();
-        int totalOrders = orderIds.size();
-        int ordersPerPartition = totalOrders == 0 ? 0 : (int) Math.ceil((double) totalOrders / gridSize);
+        List<Object[]> ranges = stagingRepository.findUnprocessedOrderIdRanges(gridSize);
 
         Map<String, ExecutionContext> partitions = new LinkedHashMap<>();
-        int fromIndex = 0;
         for (int partitionIndex = 0; partitionIndex < gridSize; partitionIndex++) {
             ExecutionContext context = new ExecutionContext();
             context.putString("partitionKey", "partition" + partitionIndex);
 
-            if (ordersPerPartition > 0 && fromIndex < totalOrders) {
-                int toIndex = Math.min(fromIndex + ordersPerPartition, totalOrders);
-                context.putString("fromOrderId", orderIds.get(fromIndex));
-                context.putString("toOrderId", orderIds.get(toIndex - 1));
-                fromIndex = toIndex;
+            if (partitionIndex < ranges.size()) {
+                Object[] range = ranges.get(partitionIndex);
+                context.putString("fromOrderId", (String) range[0]);
+                context.putString("toOrderId", (String) range[1]);
             }
 
             partitions.put("partition" + partitionIndex, context);
