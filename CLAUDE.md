@@ -39,7 +39,7 @@ python generate.py
 
 There is no separate lint step; Lombok annotation processing runs as part of `compile`/`testCompile` in the `maven-compiler-plugin` execution in `pom.xml`.
 
-`DemoApplicationTests` (`@SpringBootTest`) loads the full application context and therefore requires Postgres to be running (`docker compose up -d` first) — it will fail otherwise. `DefaultOrderLineValidatorTest` and `InvoiceCalculatorTest` are plain unit tests with no Spring context / DB dependency.
+Every `@SpringBootTest` class, including `DemoApplicationTests`, extends `AbstractPostgresIntegrationTest` and gets its own disposable Postgres via Testcontainers — so `mvnw test` needs a running Docker daemon but **not** `docker compose up -d`. `DefaultOrderLineValidatorTest` and `InvoiceCalculatorTest` are plain unit tests with no Spring context / DB dependency.
 
 **New integration tests must extend `AbstractPostgresIntegrationTest`, and its `@DirtiesContext(AFTER_CLASS)` must stay.** The container is a per-subclass static field, but Spring caches contexts by configuration — without `@DirtiesContext`, two classes with identical config would share one cached context still bound to the first class's (already stopped) container and fail with "Connection refused".
 
