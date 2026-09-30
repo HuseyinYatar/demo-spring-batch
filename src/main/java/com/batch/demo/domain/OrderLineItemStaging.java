@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -15,7 +16,10 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "order_line_item_staging")
+@Table(name = "order_line_item_staging",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_staging_order_product",
+                columnNames = { "order_id", "product_id" }))
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

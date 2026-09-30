@@ -13,8 +13,9 @@ import com.batch.demo.config.BatchProperties;
 
 /**
  * Appends rejected CSV rows to an audit file. {@link #reset()} truncates the file and
- * writes a fresh header; it is called once per job run (see the job's beforeJob
- * listener) so each run's rejects file reflects only that run.
+ * writes a fresh header; it is called once per fresh JobInstance (see the job's
+ * beforeJob listener), never on a restart, so a restart's rejects accumulate onto
+ * whatever the failed attempt already logged instead of losing it.
  */
 @Component
 public class CsvRejectedRecordSink implements RejectedRecordSink {

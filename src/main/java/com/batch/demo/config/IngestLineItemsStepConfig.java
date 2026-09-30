@@ -10,8 +10,6 @@ import org.springframework.batch.infrastructure.item.ItemWriter;
 import org.springframework.batch.infrastructure.item.file.FlatFileItemReader;
 import org.springframework.batch.infrastructure.item.file.FlatFileParseException;
 import org.springframework.batch.infrastructure.item.file.builder.FlatFileItemReaderBuilder;
-import org.springframework.batch.infrastructure.item.database.JpaItemWriter;
-import org.springframework.batch.infrastructure.item.database.builder.JpaItemWriterBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,8 +19,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import org.hibernate.exception.JDBCConnectionException;
 
-import jakarta.persistence.EntityManagerFactory;
-
 import com.batch.demo.batch.dto.OrderLineCsvRecord;
 import com.batch.demo.batch.listener.RejectedRecordSkipListener;
 import com.batch.demo.batch.observability.ChunkTracingListener;
@@ -30,6 +26,7 @@ import com.batch.demo.batch.step1.IngestRetryListener;
 import com.batch.demo.batch.step1.LineRangePartitioner;
 import com.batch.demo.batch.step1.OrderLineFieldSetMapper;
 import com.batch.demo.batch.step1.OrderLineItemValidationProcessor;
+import com.batch.demo.batch.step1.StagingInsertIgnoreDuplicatesWriter;
 import com.batch.demo.batch.validation.InvalidOrderLineException;
 import com.batch.demo.domain.OrderLineItemStaging;
 
@@ -57,11 +54,8 @@ public class IngestLineItemsStepConfig {
     }
 
     @Bean
-    public JpaItemWriter<OrderLineItemStaging> orderLineItemStagingWriter(EntityManagerFactory entityManagerFactory) {
-        return new JpaItemWriterBuilder<OrderLineItemStaging>()
-                .entityManagerFactory(entityManagerFactory)
-                .usePersist(true)
-                .build();
+    public StagingInsertIgnoreDuplicatesWriter orderLineItemStagingWriter() {
+        return new StagingInsertIgnoreDuplicatesWriter();
     }
 
     @Bean

@@ -125,21 +125,22 @@ public class BatchJobConfig {
         return new JobExecutionListener() {
             @Override
             public void beforeJob(JobExecution jobExecution) {
-                rejectedRecordSink.reset();
                 flakySimulator.reset();
 
                 // A restart of a previously-attempted execution must NOT have its
-                // partition files deleted here: buildInvoicesWorkerStep's
-                // invoiceSummaryCsvItemWriter resumes appending to the same file
-                // (restored from its own saved ExecutionContext) and expects it to
-                // still exist. Only a genuinely fresh JobInstance - which can't have
-                // touched these files itself - gets this stale-file cleanup, guarding
-                // against leftovers from an unrelated prior run (e.g. a different
-                // batch.partition-grid-size).
+                // rejects file truncated or its partition files deleted here:
+                // rejected-rows.csv already holds rows skipped by the failed attempt,
+                // and buildInvoicesWorkerStep's invoiceSummaryCsvItemWriter resumes
+                // appending to the same partition file (restored from its own saved
+                // ExecutionContext), expecting it to still exist. Only a genuinely
+                // fresh JobInstance - which can't have touched these files itself -
+                // gets the reset/cleanup, guarding against leftovers from an
+                // unrelated prior run (e.g. a different batch.partition-grid-size).
                 boolean isRestart = jobExplorer.getJobExecutions(jobExecution.getJobInstance()).size() > 1;
                 if (isRestart) {
                     return;
                 }
+                rejectedRecordSink.reset();
                 for (Path partitionFile : InvoiceSummaryPartitionPaths.listPartitionFiles(properties.getInvoiceSummaryOutputPath())) {
                     try {
                         Files.deleteIfExists(partitionFile);
