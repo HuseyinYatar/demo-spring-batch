@@ -218,7 +218,7 @@ src/main/java/com/batch/demo/
 ./mvnw test -Dtest=DefaultOrderLineValidatorTest#rejectsANegativeQuantity   # single method
 ```
 
-`DefaultOrderLineValidatorTest` and `InvoiceCalculatorTest` are plain unit tests, no Spring context. `DemoApplicationTests` loads the full Spring context against the real `docker compose` Postgres (start it first). Every other test class spins up its own disposable Postgres via **Testcontainers** — no manual setup needed, just a running Docker daemon — so the rest of the suite is fully isolated from whatever's in the shared dev database.
+`DefaultOrderLineValidatorTest` and `InvoiceCalculatorTest` are plain unit tests, no Spring context. Every Spring-context test class, including `DemoApplicationTests`, spins up its own disposable Postgres via **Testcontainers** — no manual setup needed, just a running Docker daemon — so the whole suite is isolated from whatever's in the shared dev database.
 
 The integration suite exercises the fault-tolerance and operational-control behavior end-to-end, not just the happy path:
 
