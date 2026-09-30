@@ -11,8 +11,20 @@ import com.batch.demo.domain.OrderLineItemStaging;
 
 public interface OrderLineItemStagingRepository extends JpaRepository<OrderLineItemStaging, Long> {
 
-    @Query("select distinct s.orderId from OrderLineItemStaging s where s.processed = false order by s.orderId")
-    List<String> findDistinctUnprocessedOrderIds();
+    /**
+     * Splits the sorted distinct unprocessed order ids into at most gridSize
+     * contiguous, near-equal buckets (ntile) and returns only each bucket's
+     * [min, max] - so the database does the sorting/slicing and at most gridSize
+     * rows ever reach the JVM. Each row is {fromOrderId, toOrderId}, ordered by
+     * bucket. Fewer rows than gridSize come back when there are fewer distinct
+     * orders than partitions.
+     */
+    @Query(value = "select min(order_id), max(order_id) from ("
+            + "  select order_id, ntile(:gridSize) over (order by order_id) as bucket from ("
+            + "    select distinct order_id from order_line_item_staging where processed = false"
+            + "  ) d"
+            + ") t group by bucket order by bucket", nativeQuery = true)
+    List<Object[]> findUnprocessedOrderIdRanges(@Param("gridSize") int gridSize);
 
     /**
      * Keyset-paginated: returns at most one page's worth of distinct unprocessed
