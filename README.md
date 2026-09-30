@@ -94,6 +94,8 @@ flowchart TD
 
 Both processing steps are **partitioned**: the input is split into disjoint ranges up front (line ranges for the CSV, sorted order-id ranges for the staging table) so each partition gets its own reader/writer instance and runs fully in parallel — no shared mutable state, no synchronization needed. Partition count is configurable via `batch.partition-grid-size` (default 6) and controls both the number of partitions and the worker thread pool size.
 
+The order-id ranges are computed **in the database**, not in the JVM: `OrderIdRangePartitioner` runs a native `ntile(gridSize) over (order by order_id)` query over the distinct unprocessed ids and gets back only each bucket's `min`/`max` (at most `gridSize` rows). Memory use therefore doesn't grow with the number of orders, buckets are near-equal in size, and every order lands in exactly one partition. With fewer orders than partitions, the extra partitions simply get empty ranges.
+
 - **`ingestLineItemsStep`** — reads the CSV, validates each row against a set of pluggable business rules, and writes valid, not-already-staged rows to a staging table. Malformed/invalid rows are skipped (with full audit trail); a real DB failure while writing to staging is retried instead, never skipped.
 - **`buildInvoicesStep`** — reads distinct unprocessed order ids from staging, aggregates their line items into an `Order`/`Invoice`, and writes the result to three places in one transaction: the database, a per-partition CSV summary, and back to staging (marking it processed). Both a simulated transient failure and a real DB failure demonstrate the retry policy — the chunk rolls back cleanly and retries; if retries are ever exhausted, the step (and job) fails outright rather than silently skipping an invoice. `DistinctOrderIdItemReader` fetches order ids page-by-page via keyset pagination (`orderId > lastSeenId`, capped by `batch.order-id-page-size`) rather than loading a partition's entire id range into memory at once.
 - **`mergeInvoiceSummaryStep`** — recombines the per-partition invoice-summary files into the single `invoice-summary.csv`, then removes the partition files.
@@ -126,7 +128,8 @@ See `CLAUDE.md` for the full mechanics (`JobOperator` vs. `JobLauncher` inside `
 
 - **Skip**: malformed/invalid rows in step 1 are skipped up to `batch.skip-limit`, logged with full context, and don't fail the job. Skip is reserved for genuine data-quality problems — it's never used for infrastructure failures.
 - **Retry**: real DB failures (a dropped connection, a lock timeout) and step 2's simulated transient failure are retried up to `batch.retry-limit` in both steps. If retries are exhausted, the step/job fails outright rather than silently skipping the row — a skipped write would have no audit trail, so failing loudly (and resuming via `POST .../restart`) is the safer default.
-- **Idempotency**: re-triggering the job is safe at two levels — a second launch for the same business date against an already-completed run is rejected outright (`409`), and re-ingesting the same input on a _different_ business date detects already-staged/already-invoiced rows and skips re-inserting them rather than duplicating.
+- **Backoff with jitter**: retries wait before the next attempt using an exponential backoff with random jitter (`ExponentialRandomBackOffPolicy`, shared by both worker steps). Partitions run concurrently, so one DB blip fails several at once; without jitter they'd all retry in lockstep against a database that is still recovering. The actual wait is logged as `Backing off N ms before retrying`. Tune via `batch.retry-backoff-*` (see Configuration).
+- **Idempotency**: re-triggering the job is safe at three levels — a second launch for the same business date against an already-completed run is rejected outright (`409`); re-ingesting the same input on a _different_ business date detects already-staged/already-invoiced rows and skips re-inserting them rather than duplicating; and a DB-level unique constraint on the staging table (`order_line_item_staging (order_id, product_id)`) is the authoritative guard against races between partitions or overlapping runs. Staging rows are inserted with `ON CONFLICT DO NOTHING`, so the loser of a race is dropped instead of aborting the chunk.
 
 ### Operational control
 
@@ -161,6 +164,9 @@ All under the `batch.*` prefix (`application.properties`):
 | `batch.chunk-size`                        | `5`                                   | Items per commit chunk                                             |
 | `batch.skip-limit`                        | `20`                                  | Max skips before the step fails                                    |
 | `batch.retry-limit`                       | `3`                                   | Max retry attempts on transient write failure                      |
+| `batch.retry-backoff-initial-interval-ms` | `500`                                 | Initial retry wait (jittered)                                      |
+| `batch.retry-backoff-multiplier`          | `2.0`                                 | Wait multiplier between successive retry attempts                  |
+| `batch.retry-backoff-max-interval-ms`     | `10000`                               | Upper bound on a single retry wait                                 |
 | `batch.simulate-transient-write-failures` | `true`                                | Toggle the retry-policy demo                                       |
 | `batch.partition-grid-size`               | `6`                                   | Partitions (and worker threads) per step                           |
 | `batch.order-id-page-size`                | `500`                                 | Max order ids fetched per keyset page in step 2's reader           |
@@ -194,11 +200,11 @@ src/main/java/com/batch/demo/
     dto/         Cross-step data transfer objects
     listener/    Skip listener → rejects audit log
     reject/      Rejected-record sink abstraction
-    step1/       Ingest step: CSV mapping, validation processor, line-range partitioner
-    step2/       Invoice step: aggregation, retry simulation, order-id partitioner, CSV merge
+    step1/       Ingest step: CSV mapping, validation processor, line-range partitioner, duplicate-safe staging writer
+    step2/       Invoice step: aggregation, retry simulation, order-id partitioner (ntile), CSV merge
     step3/       Daily sales report step: detail CSV field extractor, summary tasklet
     validation/  Pluggable business-rule validators (Open/Closed)
-  config/        Job/step wiring, batch properties, daily pipeline composition (JobStep)
+  config/        Job/step wiring, batch properties, retry backoff policy, daily pipeline composition (JobStep)
   domain/        JPA entities
   repository/    Spring Data repositories
   web/           REST controller, exception handling, DTOs
@@ -218,8 +224,11 @@ The integration suite exercises the fault-tolerance and operational-control beha
 
 - **Skip path** — malformed/invalid rows are actually skipped, valid ones still processed, and `rejected-rows.csv` gets the right entries (`IngestLineItemsSkipPathTest`); exceeding `batch.skip-limit` genuinely fails the step (`IngestLineItemsSkipLimitExceededTest`).
 - **Retry, simulated and real** — the demo's simulated transient failure recovers via retry (`BuildInvoicesRetrySuccessTest`), and so does a _real_, correctly-classified DB connection failure, injected via an in-process `DataSource` proxy that matches specific SQL statements (`BuildInvoicesDbConnectionRetryTest`, `IngestLineItemsDbConnectionRetryTest`).
+- **Retry backoff** — retry backoff intervals are shrunk to 10–50 ms in `application-test.properties`, so the retry tests exercise the real backoff path without sleeping for seconds.
 - **Failure + restart** — a genuine mid-step failure (via the same fault-injection technique) followed by `POST .../restart` resumes cleanly with no duplicated or lost rows, for both steps (`OrderProcessingJobFailureRestartTest`, `IngestLineItemsRestartTest`).
 - **Idempotency** — a same-day relaunch is rejected (`409`), and a relaunch on a different business date against the same input doesn't duplicate any rows (`OrderProcessingJobIdempotencyTest`).
+- **Unique constraint** — a duplicate `(orderId, productId)` staging insert is dropped by `ON CONFLICT DO NOTHING` instead of aborting the chunk (`StagingUniqueConstraintTest`).
+- **Partitioning boundaries** — `OrderIdRangePartitionerTest` verifies the `ntile`-based ranges cover every order id exactly once, including when there are fewer orders than partitions.
 - **Operational control** — `stop` genuinely interrupts a running job and `abandon` transitions a stopped execution correctly (`JobControlOperationsTest`).
 - **Real parallelism** — every other test pins `batch.partition-grid-size=1` for determinism; `PartitionedProcessingTest` raises it back up to verify multi-partition runs merge correctly with nothing dropped or duplicated across partition boundaries.
 - **Job composition** — the daily pipeline runs both nested jobs and produces a correct report (`DailyPipelineJobTest`), a same-day relaunch and cross-endpoint conflict both fail as expected (`DailyPipelineJobIdempotencyTest`), and a failure in the report job followed by restart resumes only that nested job — proven by inspecting nested `JobInstance`/`JobExecution` counts before and after, not just the top-level status (`DailyPipelineJobRestartTest`).
@@ -228,6 +237,7 @@ The integration suite exercises the fault-tolerance and operational-control beha
 ## Known limitations (demo scope)
 
 - No schema migration tool (Flyway/Liquibase) — `spring.jpa.hibernate.ddl-auto=update`.
+- With `ddl-auto=update`, Hibernate adds the staging unique constraint to an existing table on boot but only logs a warning if the table already holds duplicates — clean those up first.
 - The row-level dedup key (`orderId` + `productId`) assumes an order has at most one line item per product; it also detects and drops exact re-deliveries but doesn't reconcile _corrections_ — a resend with a different quantity/price is treated as a duplicate and silently dropped, the original wins.
 - Grafana runs with anonymous viewer access and default credentials — fine for local use, not for anything internet-facing.
 - Actuator endpoints are unauthenticated.
