@@ -129,7 +129,7 @@ See `CLAUDE.md` for the full mechanics (`JobOperator` vs. `JobLauncher` inside `
 - **Skip**: malformed/invalid rows in step 1 are skipped up to `batch.skip-limit`, logged with full context, and don't fail the job. Skip is reserved for genuine data-quality problems — it's never used for infrastructure failures.
 - **Retry**: real DB failures (a dropped connection, a lock timeout) and step 2's simulated transient failure are retried up to `batch.retry-limit` in both steps. If retries are exhausted, the step/job fails outright rather than silently skipping the row — a skipped write would have no audit trail, so failing loudly (and resuming via `POST .../restart`) is the safer default.
 - **Backoff with jitter**: retries wait before the next attempt using an exponential backoff with random jitter (`ExponentialRandomBackOffPolicy`, shared by both worker steps). Partitions run concurrently, so one DB blip fails several at once; without jitter they'd all retry in lockstep against a database that is still recovering. The actual wait is logged as `Backing off N ms before retrying`. Tune via `batch.retry-backoff-*` (see Configuration).
-- **Idempotency**: re-triggering the job is safe at three levels — a second launch for the same business date against an already-completed run is rejected outright (`409`); re-ingesting the same input on a _different_ business date detects already-staged/already-invoiced rows and skips re-inserting them rather than duplicating; and a DB-level unique constraint on the staging table (`order_line_item_staging (order_id, product_id)`) is the authoritative guard against races between partitions or overlapping runs. Staging rows are inserted with `ON CONFLICT DO NOTHING`, so the loser of a race is dropped instead of aborting the chunk.
+- **Idempotency**: re-triggering the job is safe at three levels — a second launch for the same business date against an already-completed run is rejected outright (`409`); re-ingesting the same input on a _different_ business date skips already-staged/already-invoiced rows rather than duplicating; and a DB-level unique constraint on the staging table (`order_line_item_staging (order_id, product_id)`) is the guard that drops re-delivered rows and resolves races between partitions or overlapping runs. Staging rows are inserted with `ON CONFLICT DO NOTHING`, so the loser of a race is dropped instead of aborting the chunk.
 
 ### Operational control
 
@@ -178,8 +178,8 @@ All under the `batch.*` prefix (`application.properties`):
 `docker compose up -d` also starts:
 
 - **Grafana** — `http://localhost:3000` (anonymous viewer access, no login needed):
-  - _Batch Job & Step Executions_ — every job/step execution row, queried directly from Postgres.
-  - _Batch Metrics (Prometheus)_ — job/step duration trends, queried from Prometheus.
+  - _Batch Job & Step Executions_ — every job/step execution row, queried directly from Postgres, plus a step timeline (bars at real start/end times, partitions side by side) and a duration-per-run bar chart. Set the dashboard's **App timezone** variable if the app doesn't run in `Europe/Istanbul`.
+  - _Batch Metrics (Prometheus)_ — run count, max duration, average job duration and average duration per step, queried from Prometheus.
 - **Prometheus** — `http://localhost:9090`, scraping `/actuator/prometheus` every 15s.
 - **Tempo** — one trace per job run: job span → step spans (including each partition) → per-chunk spans within each partition. No UI of its own; browse traces via Grafana's "Tempo" datasource (`http://localhost:3000`). Actuator's own traffic (Prometheus's 15s scrape, health checks) is deliberately excluded from tracing so it doesn't drown out the traces that matter.
 

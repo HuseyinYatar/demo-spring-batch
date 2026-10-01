@@ -104,7 +104,11 @@ class OrderProcessingJobIdempotencyTest extends AbstractPostgresIntegrationTest 
 
         StepExecution secondIngest = StepExecutions.named(secondExecution, "ingestLineItemsWorkerStep:partition0");
         assertThat(secondIngest.getReadCount()).isEqualTo(7);
-        assertThat(secondIngest.getWriteCount()).isZero();
+        // Duplicates are dropped by the writer (ON CONFLICT DO NOTHING), not filtered in
+        // the processor, so they still count as written - the staging row count above is
+        // the real proof that nothing was duplicated.
+        assertThat(secondIngest.getFilterCount()).isZero();
+        assertThat(secondIngest.getWriteCount()).isEqualTo(7);
 
         StepExecution secondBuild = StepExecutions.named(secondExecution, "buildInvoicesWorkerStep:partition0");
         assertThat(secondBuild.getReadCount()).isZero();
