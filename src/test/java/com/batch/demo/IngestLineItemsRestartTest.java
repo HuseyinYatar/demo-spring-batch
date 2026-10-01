@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * LineRangePartitioner recomputing the same full-file line ranges on every launch
  * including restart. This test exists to verify that combination doesn't silently
  * drop or duplicate rows - CLAUDE.md documents the expectation (the
- * existsByOrderIdAndProductId dedup guard should cover this) but until this test, it
+ * staging unique constraint + ON CONFLICT DO NOTHING should cover this) but until this test, it
  * was never actually run.
  */
 @SpringBootTest
