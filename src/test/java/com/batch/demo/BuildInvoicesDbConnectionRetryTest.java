@@ -76,11 +76,12 @@ class BuildInvoicesDbConnectionRetryTest extends AbstractPostgresIntegrationTest
                 .addString("inputFile", "classpath:data/test-order-line-items.csv")
                 .toJobParameters();
 
-        // chunk-size=2: orders 1-2 commit, order 3's insert throws the injected
-        // SQLTransientConnectionException, classified as DataAccessResourceFailureException
-        // via Spring Data's repository exception translation - now retryable, so the
-        // retried attempt (trigger already fired once) succeeds.
-        trigger.arm(2);
+        // chunk-size=2: orders 1-2 commit, the second chunk's batched order insert (one
+        // prepared statement per chunk) throws the injected SQLTransientConnectionException,
+        // classified as DataAccessResourceFailureException via Spring Data's repository
+        // exception translation - now retryable, so the retried attempt (trigger already
+        // fired once) succeeds.
+        trigger.arm(1);
         JobExecution execution = jobLauncherTestUtils.launchJob(jobParameters);
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
