@@ -26,6 +26,9 @@ public class OrderPersistenceItemWriter implements ItemWriter<OrderInvoiceResult
         List<Order> orders = chunk.getItems().stream()
                 .map(OrderInvoiceResult::order)
                 .toList();
-        orderRepository.saveAll(orders);
+        // Flush inside write(): with batched inserts the SQL is deferred until flush, and a
+        // flush left to the chunk commit would run outside the step's retry scope and
+        // bypass the repository's exception translation the retry policy relies on.
+        orderRepository.saveAllAndFlush(orders);
     }
 }
