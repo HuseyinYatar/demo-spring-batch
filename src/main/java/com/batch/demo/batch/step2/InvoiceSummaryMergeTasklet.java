@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.batch.core.scope.context.ChunkContext;
@@ -13,12 +14,13 @@ import org.springframework.batch.core.step.StepContribution;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.infrastructure.repeat.RepeatStatus;
 
+import com.batch.demo.batch.support.BusinessDatePaths;
 import com.batch.demo.config.BatchProperties;
 
 /**
  * Recombines the per-partition invoice-summary files written by
  * buildInvoicesStep (see BuildInvoicesStepConfig) into the single
- * invoice-summary.csv the job is documented to produce, then removes the
+ * invoice-summary-&lt;businessDate&gt;.csv the job is documented to produce, then removes the
  * partition files. Runs as a plain Tasklet - a one-shot file merge, not a
  * chunk-oriented read/process/write.
  */
@@ -34,7 +36,9 @@ public class InvoiceSummaryMergeTasklet implements Tasklet {
 
     @Override
     public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
-        String basePath = properties.getInvoiceSummaryOutputPath();
+        LocalDate businessDate = chunkContext.getStepContext().getStepExecution()
+                .getJobParameters().getLocalDate("businessDate");
+        String basePath = BusinessDatePaths.withBusinessDate(properties.getInvoiceSummaryOutputPath(), businessDate);
         List<Path> partitionFiles = InvoiceSummaryPartitionPaths.listPartitionFiles(basePath);
 
         Path merged = Path.of(basePath);

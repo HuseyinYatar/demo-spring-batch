@@ -1,5 +1,6 @@
 package com.batch.demo.config;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.batch.core.step.Step;
@@ -23,6 +24,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import com.batch.demo.batch.dto.OrderInvoiceResult;
 import com.batch.demo.batch.observability.ChunkTracingListener;
+import com.batch.demo.batch.support.BusinessDatePaths;
 import com.batch.demo.batch.step2.DistinctOrderIdItemReader;
 import com.batch.demo.batch.step2.InvoiceSummaryMergeTasklet;
 import com.batch.demo.batch.step2.InvoiceSummaryFieldExtractor;
@@ -51,18 +53,19 @@ public class BuildInvoicesStepConfig {
      * Step-scoped and suffixed per partition: a FlatFileItemWriter's open()/close()
      * lifecycle runs once per StepExecution, so a shared singleton here would have
      * concurrent partitions calling open() on the same instance and corrupting it.
-     * Each partition writes its own invoice-summary-partitionN.csv instead.
+     * Each partition writes its own invoice-summary-&lt;businessDate&gt;-partitionN.csv instead.
      */
     @Bean
     @StepScope
     public FlatFileItemWriter<OrderInvoiceResult> invoiceSummaryCsvItemWriter(
             BatchProperties properties,
             InvoiceSummaryFieldExtractor fieldExtractor,
-            @Value("#{stepExecutionContext['partitionKey']}") String partitionKey) {
+            @Value("#{stepExecutionContext['partitionKey']}") String partitionKey,
+            @Value("#{jobParameters['businessDate']}") LocalDate businessDate) {
+        String datedBasePath = BusinessDatePaths.withBusinessDate(properties.getInvoiceSummaryOutputPath(), businessDate);
         return new FlatFileItemWriterBuilder<OrderInvoiceResult>()
                 .name("invoiceSummaryCsvItemWriter")
-                .resource(new FileSystemResource(
-                        InvoiceSummaryPartitionPaths.partitionPath(properties.getInvoiceSummaryOutputPath(), partitionKey)))
+                .resource(new FileSystemResource(InvoiceSummaryPartitionPaths.partitionPath(datedBasePath, partitionKey)))
                 .delimited()
                 .delimiter(",")
                 .fieldExtractor(fieldExtractor)

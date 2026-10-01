@@ -19,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
+import com.batch.demo.batch.support.BusinessDatePaths;
 import com.batch.demo.config.BatchProperties;
 import com.batch.demo.domain.OrderLineItemStaging;
 import com.batch.demo.repository.OrderLineItemStagingRepository;
@@ -59,8 +60,9 @@ class IngestLineItemsSkipPathTest extends AbstractPostgresIntegrationTest {
 
     @Test
     void skipsMalformedAndInvalidRowsButProcessesValidOnes() throws Exception {
+        LocalDate businessDate = LocalDate.of(2099, 1, 1);
         JobParameters jobParameters = new JobParametersBuilder()
-                .addLocalDate("businessDate", LocalDate.now())
+                .addLocalDate("businessDate", businessDate)
                 .addString("inputFile", "classpath:data/test-order-line-items-with-rejects.csv")
                 .toJobParameters();
 
@@ -81,7 +83,8 @@ class IngestLineItemsSkipPathTest extends AbstractPostgresIntegrationTest {
         assertThat(stagingRepository.findAll()).extracting(OrderLineItemStaging::getOrderId)
                 .containsExactlyInAnyOrder("ORD-R01", "ORD-R02", "ORD-R03");
 
-        String rejectedRowsContent = Files.readString(Path.of(batchProperties.getRejectsFilePath()));
+        String rejectedRowsContent = Files.readString(
+                Path.of(BusinessDatePaths.withBusinessDate(batchProperties.getRejectsFilePath(), businessDate)));
         assertThat(rejectedRowsContent)
                 .contains("orderId must not be blank")
                 .contains("customerName must not be blank")

@@ -6,9 +6,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.LocalDate;
 
 import org.springframework.stereotype.Component;
 
+import com.batch.demo.batch.support.BusinessDatePaths;
 import com.batch.demo.config.BatchProperties;
 
 /**
@@ -22,14 +24,19 @@ public class CsvRejectedRecordSink implements RejectedRecordSink {
 
     private static final String HEADER = "stage,reason,timestamp,rawContent";
 
-    private final Path path;
+    private final String basePath;
 
     public CsvRejectedRecordSink(BatchProperties properties) {
-        this.path = Path.of(properties.getRejectsFilePath());
+        this.basePath = properties.getRejectsFilePath();
+    }
+
+    private Path pathFor(LocalDate businessDate) {
+        return Path.of(BusinessDatePaths.withBusinessDate(basePath, businessDate));
     }
 
     @Override
-    public synchronized void reset() {
+    public synchronized void reset(LocalDate businessDate) {
+        Path path = pathFor(businessDate);
         try {
             Files.writeString(path, HEADER + System.lineSeparator(), StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
@@ -39,7 +46,8 @@ public class CsvRejectedRecordSink implements RejectedRecordSink {
     }
 
     @Override
-    public synchronized void accept(RejectedRecord rejectedRecord) {
+    public synchronized void accept(LocalDate businessDate, RejectedRecord rejectedRecord) {
+        Path path = pathFor(businessDate);
         String line = String.join(",",
                 csvEscape(rejectedRecord.stage()),
                 csvEscape(rejectedRecord.reason()),
