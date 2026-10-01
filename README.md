@@ -178,8 +178,8 @@ All under the `batch.*` prefix (`application.properties`):
 `docker compose up -d` also starts:
 
 - **Grafana** — `http://localhost:3000` (anonymous viewer access, no login needed):
-  - _Batch Job & Step Executions_ — every job/step execution row, queried directly from Postgres.
-  - _Batch Metrics (Prometheus)_ — job/step duration trends, queried from Prometheus.
+  - _Batch Job & Step Executions_ — every job/step execution row, queried directly from Postgres, plus a step timeline (bars at real start/end times, partitions side by side) and a duration-per-run bar chart. Set the dashboard's **App timezone** variable if the app doesn't run in `Europe/Istanbul`.
+  - _Batch Metrics (Prometheus)_ — run count, max duration, average job duration and average duration per step, queried from Prometheus.
 - **Prometheus** — `http://localhost:9090`, scraping `/actuator/prometheus` every 15s.
 - **Tempo** — one trace per job run: job span → step spans (including each partition) → per-chunk spans within each partition. No UI of its own; browse traces via Grafana's "Tempo" datasource (`http://localhost:3000`). Actuator's own traffic (Prometheus's 15s scrape, health checks) is deliberately excluded from tracing so it doesn't drown out the traces that matter.
 
