@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 
 import org.springframework.batch.core.configuration.JobRegistry;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
@@ -25,6 +26,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import com.batch.demo.batch.reject.RejectedRecordSink;
 import com.batch.demo.batch.step2.FlakyOrderPersistenceSimulator;
 import com.batch.demo.batch.step2.InvoiceSummaryPartitionPaths;
+import com.batch.demo.batch.support.BusinessDatePaths;
 
 /**
  * {@code @EnableBatchProcessing} + {@link EnableJdbcJobRepository} together back the
@@ -127,8 +129,10 @@ public class BatchJobConfig {
                 if (isRestart) {
                     return;
                 }
-                rejectedRecordSink.reset();
-                for (Path partitionFile : InvoiceSummaryPartitionPaths.listPartitionFiles(properties.getInvoiceSummaryOutputPath())) {
+                LocalDate businessDate = jobExecution.getJobParameters().getLocalDate("businessDate");
+                rejectedRecordSink.reset(businessDate);
+                String datedSummaryPath = BusinessDatePaths.withBusinessDate(properties.getInvoiceSummaryOutputPath(), businessDate);
+                for (Path partitionFile : InvoiceSummaryPartitionPaths.listPartitionFiles(datedSummaryPath)) {
                     try {
                         Files.deleteIfExists(partitionFile);
                     } catch (IOException e) {
