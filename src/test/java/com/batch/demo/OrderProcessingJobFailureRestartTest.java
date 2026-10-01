@@ -75,8 +75,10 @@ class OrderProcessingJobFailureRestartTest extends AbstractPostgresIntegrationTe
                 .addLong("startedAtEpochMs", System.currentTimeMillis(), false)
                 .toJobParameters();
 
-        // Phase 1: induce a genuine failure mid-way through buildInvoicesStep.
-        trigger.arm(2);
+        // Phase 1: induce a genuine failure mid-way through buildInvoicesStep. The writer
+        // prepares one order insert per chunk (chunk-size=2), so one success is allowed:
+        // chunk 1 (T01, T02) commits, chunk 2 fails.
+        trigger.arm(1);
         JobExecution execution = jobLauncherTestUtils.launchJob(jobParameters);
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.FAILED);
