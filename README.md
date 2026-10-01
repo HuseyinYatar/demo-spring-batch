@@ -4,9 +4,9 @@ A Spring Batch demo that ingests a CSV of order line items, validates and aggreg
 
 ## What it does
 
-1. **Ingest** — reads a CSV of raw order line items, validates each row, and lands valid ones in a staging table. Malformed rows (bad CSV format, non-numeric price, bad date) and business-rule violations (negative quantity/price, blank customer/order id) are skipped and logged to `rejected-rows.csv`, not silently dropped or allowed to crash the job. The file is reset for each new run but left intact on a restart, so rows rejected before a failure are never lost. A real DB failure (dropped connection, lock timeout) is retried instead, never skipped.
+1. **Ingest** — reads a CSV of raw order line items, validates each row, and lands valid ones in a staging table. Malformed rows (bad CSV format, non-numeric price, bad date) and business-rule violations (negative quantity/price, blank customer/order id) are skipped and logged to `rejected-rows-<businessDate>.csv`, not silently dropped or allowed to crash the job. The file is reset for each new run but left intact on a restart, so rows rejected before a failure are never lost. A real DB failure (dropped connection, lock timeout) is retried instead, never skipped.
 2. **Aggregate & invoice** — groups staged line items by order, computes tax/totals, and persists an `Order` + `Invoice` per order. A genuinely simulated transient-write failure exercises the retry policy on every run; a real DB failure is retried the same way — but unlike a malformed row, it's never silently skipped, since a skipped invoice would vanish with no audit trail. If retries are exhausted, the job fails loudly and is meant to be resumed via `POST .../restart`, not silently patched over.
-3. **Merge** — recombines the partitioned output into one `invoice-summary.csv`.
+3. **Merge** — recombines the partitioned output into one `invoice-summary-<businessDate>.csv`.
 
 A separate **daily pipeline** job composes the whole order-processing job above with a second, downstream **daily sales report** job — reading that day's invoices, writing a detail CSV, and upserting a per-day summary (invoice count, totals, top customer) — as a single orchestrated run. See [Job composition](#job-composition-daily-pipeline) below.
 
@@ -68,7 +68,7 @@ flowchart TD
         P1 --> R1["read row"]
         R1 --> V1{"valid?"}
         V1 -- "yes, and not a duplicate" --> W1{"write to staging"}
-        V1 -- "no: parse or validation error" --> REJ[("rejected-rows.csv")]
+        V1 -- "no: parse or validation error" --> REJ[("rejected-rows-YYYY-MM-DD.csv")]
         W1 -- "real DB failure" --> RETRY1["rollback + retry"]
         RETRY1 --> W1
         W1 -- "success" --> STG[("staging table")]
@@ -83,12 +83,12 @@ flowchart TD
         RETRY2 --> WR
         WR -- "retries exhausted" --> FAIL["job fails\n(resume via POST /restart)"]
         WR -- "success" --> DB[("orders / invoices")]
-        WR -- "success" --> PCSV[("invoice-summary-partitionN.csv")]
+        WR -- "success" --> PCSV[("invoice-summary-YYYY-MM-DD-partitionN.csv")]
         WR -- "success" --> MARK["mark staging row processed"]
     end
 
     PCSV --> MERGE["mergeInvoiceSummaryStep (tasklet)"]
-    MERGE --> FINAL[("invoice-summary.csv")]
+    MERGE --> FINAL[("invoice-summary-YYYY-MM-DD.csv")]
     MERGE -. deletes .-> PCSV
 ```
 
@@ -98,7 +98,7 @@ The order-id ranges are computed **in the database**, not in the JVM: `OrderIdRa
 
 - **`ingestLineItemsStep`** — reads the CSV, validates each row against a set of pluggable business rules, and writes valid, not-already-staged rows to a staging table. Malformed/invalid rows are skipped (with full audit trail); a real DB failure while writing to staging is retried instead, never skipped.
 - **`buildInvoicesStep`** — reads distinct unprocessed order ids from staging, aggregates their line items into an `Order`/`Invoice`, and writes the result to three places in one transaction: the database, a per-partition CSV summary, and back to staging (marking it processed). Both a simulated transient failure and a real DB failure demonstrate the retry policy — the chunk rolls back cleanly and retries; if retries are ever exhausted, the step (and job) fails outright rather than silently skipping an invoice. `DistinctOrderIdItemReader` fetches order ids page-by-page via keyset pagination (`orderId > lastSeenId`, capped by `batch.order-id-page-size`) rather than loading a partition's entire id range into memory at once.
-- **`mergeInvoiceSummaryStep`** — recombines the per-partition invoice-summary files into the single `invoice-summary.csv`, then removes the partition files.
+- **`mergeInvoiceSummaryStep`** — recombines the per-partition invoice-summary files into the single `invoice-summary-<businessDate>.csv`, then removes the partition files.
 
 ### Job composition: daily pipeline
 
@@ -158,8 +158,8 @@ All under the `batch.*` prefix (`application.properties`):
 | Property                                  | Default                               | Description                                                        |
 | ----------------------------------------- | ------------------------------------- | ------------------------------------------------------------------ |
 | `batch.input-csv-path`                    | `classpath:data/order-line-items.csv` | Source CSV                                                         |
-| `batch.rejects-file-path`                 | `rejected-rows.csv`                   | Skip audit log (reset per new run, preserved across restarts)      |
-| `batch.invoice-summary-output-path`       | `invoice-summary.csv`                 | Final merged output                                                |
+| `batch.rejects-file-path`                 | `rejected-rows.csv`                   | Skip audit log, one file per business date (`-<businessDate>` inserted before the extension; reset per new run, kept on restart) |
+| `batch.invoice-summary-output-path`       | `invoice-summary.csv`                 | Base name for the final merged output (`-<businessDate>` inserted before the extension)|
 | `batch.tax-rate`                          | `0.18`                                | Applied to invoice subtotals                                       |
 | `batch.chunk-size`                        | `5`                                   | Items per commit chunk                                             |
 | `batch.skip-limit`                        | `20`                                  | Max skips before the step fails                                    |
@@ -222,7 +222,7 @@ src/main/java/com/batch/demo/
 
 The integration suite exercises the fault-tolerance and operational-control behavior end-to-end, not just the happy path:
 
-- **Skip path** — malformed/invalid rows are actually skipped, valid ones still processed, and `rejected-rows.csv` gets the right entries (`IngestLineItemsSkipPathTest`); exceeding `batch.skip-limit` genuinely fails the step (`IngestLineItemsSkipLimitExceededTest`).
+- **Skip path** — malformed/invalid rows are actually skipped, valid ones still processed, and `rejected-rows-<businessDate>.csv` gets the right entries (`IngestLineItemsSkipPathTest`); exceeding `batch.skip-limit` genuinely fails the step (`IngestLineItemsSkipLimitExceededTest`).
 - **Retry, simulated and real** — the demo's simulated transient failure recovers via retry (`BuildInvoicesRetrySuccessTest`), and so does a _real_, correctly-classified DB connection failure, injected via an in-process `DataSource` proxy that matches specific SQL statements (`BuildInvoicesDbConnectionRetryTest`, `IngestLineItemsDbConnectionRetryTest`).
 - **Retry backoff** — retry backoff intervals are shrunk to 10–50 ms in `application-test.properties`, so the retry tests exercise the real backoff path without sleeping for seconds.
 - **Failure + restart** — a genuine mid-step failure (via the same fault-injection technique) followed by `POST .../restart` resumes cleanly with no duplicated or lost rows, for both steps (`OrderProcessingJobFailureRestartTest`, `IngestLineItemsRestartTest`).

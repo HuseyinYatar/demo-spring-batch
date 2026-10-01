@@ -265,6 +265,13 @@ Two layers guard against duplicate work on re-trigger:
 
 `inputCsvPath`, `rejectsFilePath`, `invoiceSummaryOutputPath`, `taxRate`, `chunkSize`, `skipLimit`, `retryLimit`, `retryBackoffInitialIntervalMs`, `retryBackoffMultiplier`, `retryBackoffMaxIntervalMs`, `simulateTransientWriteFailures`, `partitionGridSize`, `orderIdPageSize`, `dailySalesReportOutputDir`, `reportTopCustomerCount` — bound via `@ConfigurationProperties`, registered with `@EnableConfigurationProperties(BatchProperties.class)` on `DemoApplication`.
 
+### Output files are suffixed with the run's `businessDate`
+
+`batch.rejects-file-path` and `batch.invoice-summary-output-path` are *base* names: `BusinessDatePaths.withBusinessDate` (`batch/support/`) inserts `-<businessDate>` before the extension (`invoice-summary-2026-10-01.csv`, `rejected-rows-2026-10-01.csv`, partition files `invoice-summary-2026-10-01-partition0.csv`). Everywhere else in this file, "`invoice-summary.csv`" / "`rejected-rows.csv`" means that dated file. Each date's files are independent, so a run for another date no longer overwrites or merges with an earlier date's output (the stale-partition-file cleanup in `perRunStateResetListener` is now naturally scoped to the current date).
+
+- The date is read from the `businessDate` JobParameter at point of use, never held in a singleton: `invoiceSummaryCsvItemWriter` and `RejectedRecordSkipListener` are `@StepScope` with `@Value("#{jobParameters['businessDate']}")`, the merge tasklet and `perRunStateResetListener` read it from the `StepExecution`/`JobExecution`. That keeps restarts (even after an app restart) pointing at the same files. `RejectedRecordSink` methods take the date as an argument for the same reason.
+- Anything that launches `orderProcessingJob` must supply `businessDate` (the controller always does); it is already required by `InvoiceAggregationProcessor`.
+
 ### Demo-only shortcuts (would not survive contact with production)
 
 - `spring.jpa.hibernate.ddl-auto=update` — no migration tool (Flyway/Liquibase) is wired up.
