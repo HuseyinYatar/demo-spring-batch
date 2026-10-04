@@ -15,11 +15,20 @@ public record JobExecutionStatusResponse(Long jobExecutionId,
                                           long writeCount,
                                           long skipCount) {
 
+    // Worker step executions of a partitioned step are named "<workerStep>:<partitionKey>".
+    private static final String PARTITION_NAME_MARKER = ":partition";
+
     public static JobExecutionStatusResponse from(JobExecution execution) {
         long readCount = 0;
         long writeCount = 0;
         long skipCount = 0;
         for (StepExecution stepExecution : execution.getStepExecutions()) {
+            // The manager step's StepExecution already carries the sum of its workers'
+            // counts (Spring Batch aggregates them on completion), so adding the worker
+            // executions too would count every partitioned item twice.
+            if (stepExecution.getStepName().contains(PARTITION_NAME_MARKER)) {
+                continue;
+            }
             readCount += stepExecution.getReadCount();
             writeCount += stepExecution.getWriteCount();
             skipCount += stepExecution.getSkipCount();
