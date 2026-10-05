@@ -5,6 +5,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import org.assertj.core.api.ThrowingConsumer;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.repository.explore.JobExplorer;
@@ -33,10 +34,21 @@ public final class RunningJobs {
     public static JobExecution launchAndStop(JobLauncherTestUtils jobLauncherTestUtils, JobExplorer jobExplorer,
             JobControlService jobControlService, ExecutorService executor, JobParameters jobParameters)
             throws Exception {
+        return launchAndStop(jobLauncherTestUtils, jobExplorer, executor, jobParameters, jobControlService::stop);
+    }
+
+    /**
+     * Same as above, but the stop request is whatever {@code stopAction} does with the
+     * running execution's id - lets a test stop through the REST endpoint instead of
+     * calling JobControlService directly.
+     */
+    public static JobExecution launchAndStop(JobLauncherTestUtils jobLauncherTestUtils, JobExplorer jobExplorer,
+            ExecutorService executor, JobParameters jobParameters, ThrowingConsumer<Long> stopAction)
+            throws Exception {
         Future<JobExecution> future = executor.submit(() -> jobLauncherTestUtils.launchJob(jobParameters));
 
         JobExecution running = awaitRunning(jobExplorer, jobParameters, Instant.now().plusSeconds(5));
-        jobControlService.stop(running.getId());
+        stopAction.accept(running.getId());
 
         return future.get(15, TimeUnit.SECONDS);
     }
