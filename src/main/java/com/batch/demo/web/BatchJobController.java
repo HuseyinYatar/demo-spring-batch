@@ -125,13 +125,14 @@ public class BatchJobController {
                 execution.getStartTime()));
     }
 
+    /**
+     * No null check on purpose: the JDBC-backed JobExplorer never returns null for an
+     * unknown id, it throws EmptyResultDataAccessException, which
+     * BatchOperationExceptionHandler maps to 404 (see JobControlEndpointsTest).
+     */
     @GetMapping("/executions/{id}")
     public ResponseEntity<JobExecutionStatusResponse> getExecution(@PathVariable Long id) {
-        JobExecution execution = jobExplorer.getJobExecution(id);
-        if (execution == null) {
-            return ResponseEntity.notFound().build();
-        }
-        return ResponseEntity.ok(JobExecutionStatusResponse.from(execution));
+        return ResponseEntity.ok(JobExecutionStatusResponse.from(jobExplorer.getJobExecution(id)));
     }
 
     @PostMapping("/executions/{id}/stop")
