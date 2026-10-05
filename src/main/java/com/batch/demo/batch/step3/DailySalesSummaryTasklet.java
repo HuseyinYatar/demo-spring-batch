@@ -64,10 +64,12 @@ public class DailySalesSummaryTasklet implements Tasklet {
         report.setTotalSubtotal(aggregate.getTotalSubtotal());
         report.setTotalTax(aggregate.getTotalTax());
         report.setTotalAmount(aggregate.getTotalAmount());
-        if (!topCustomers.isEmpty()) {
-            report.setTopCustomerName(topCustomers.get(0).getCustomerName());
-            report.setTopCustomerTotal(topCustomers.get(0).getTotalSpend());
-        }
+        // Assigned even when there is no top customer: on a re-run for an already-reported
+        // date the row still holds the previous run's values, which would otherwise
+        // survive next to an invoiceCount of 0.
+        CustomerSpend topCustomer = topCustomers.isEmpty() ? null : topCustomers.get(0);
+        report.setTopCustomerName(topCustomer != null ? topCustomer.getCustomerName() : null);
+        report.setTopCustomerTotal(topCustomer != null ? topCustomer.getTotalSpend() : null);
         report.setGeneratedAt(Instant.now());
         dailySalesReportRepository.save(report);
 
