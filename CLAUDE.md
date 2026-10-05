@@ -57,8 +57,8 @@ curl http://localhost:8080/api/batch/jobs/executions/{id}
 curl -X POST "http://localhost:8080/api/batch/jobs/order-processing?businessDate=2099-01-01"
 
 # Composed run: orderProcessingJob followed by dailySalesReportJob (see "Job composition" below).
-# Same businessDate param. Caveat: Invoice.issuedDate is always LocalDate.now(), so a
-# businessDate override makes the daily report come back with invoiceCount = 0.
+# Same businessDate param. Invoices are stamped with the run's businessDate (not
+# LocalDate.now()), so an override still yields a report for that date.
 curl -X POST http://localhost:8080/api/batch/jobs/daily-pipeline
 
 # Operational control (JobOperator - see Architecture below)
