@@ -4,12 +4,15 @@ import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.repository.explore.JobExplorer;
 import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.batch.core.step.job.DefaultJobParametersExtractor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import com.batch.demo.batch.listener.NestedJobCountsRollupListener;
 
 /**
  * dailyPipelineJob orchestrates the existing orderProcessingJob and the new
@@ -54,28 +57,34 @@ import org.springframework.context.annotation.Configuration;
 public class DailyPipelineJobConfig {
 
     @Bean
-    public Step orderProcessingJobStep(JobRepository jobRepository, JobOperator jobOperator,
+    public Step orderProcessingJobStep(JobRepository jobRepository, JobOperator jobOperator, JobExplorer jobExplorer,
                                         @Qualifier("orderProcessingJob") Job orderProcessingJob) {
-        DefaultJobParametersExtractor extractor = new DefaultJobParametersExtractor();
-        extractor.setUseAllParentParameters(false);
-        extractor.setKeys(new String[] {"businessDate", "inputFile"});
-        return new StepBuilder("orderProcessingJobStep", jobRepository)
-                .job(orderProcessingJob)
-                .operator(jobOperator)
-                .parametersExtractor(extractor)
-                .build();
+        return nestedJobStep("orderProcessingJobStep", orderProcessingJob,
+                new String[] {"businessDate", "inputFile"}, jobRepository, jobOperator, jobExplorer);
     }
 
     @Bean
-    public Step dailySalesReportJobStep(JobRepository jobRepository, JobOperator jobOperator,
+    public Step dailySalesReportJobStep(JobRepository jobRepository, JobOperator jobOperator, JobExplorer jobExplorer,
                                          @Qualifier("dailySalesReportJob") Job dailySalesReportJob) {
+        return nestedJobStep("dailySalesReportJobStep", dailySalesReportJob,
+                new String[] {"businessDate"}, jobRepository, jobOperator, jobExplorer);
+    }
+
+    /**
+     * NestedJobCountsRollupListener copies the nested job's read/write/skip counts onto
+     * the JobStep's own StepExecution: the nested job's step executions belong to its
+     * own JobExecution, so without it this job's status would report 0 for all of them.
+     */
+    private Step nestedJobStep(String stepName, Job nestedJob, String[] parameterKeys,
+                               JobRepository jobRepository, JobOperator jobOperator, JobExplorer jobExplorer) {
         DefaultJobParametersExtractor extractor = new DefaultJobParametersExtractor();
         extractor.setUseAllParentParameters(false);
-        extractor.setKeys(new String[] {"businessDate"});
-        return new StepBuilder("dailySalesReportJobStep", jobRepository)
-                .job(dailySalesReportJob)
+        extractor.setKeys(parameterKeys);
+        return new StepBuilder(stepName, jobRepository)
+                .job(nestedJob)
                 .operator(jobOperator)
                 .parametersExtractor(extractor)
+                .listener(new NestedJobCountsRollupListener(jobExplorer, nestedJob, extractor))
                 .build();
     }
 

@@ -3,7 +3,8 @@ package com.batch.demo.web.dto;
 import java.time.LocalDateTime;
 
 import org.springframework.batch.core.job.JobExecution;
-import org.springframework.batch.core.step.StepExecution;
+
+import com.batch.demo.batch.support.JobCounts;
 
 public record JobExecutionStatusResponse(Long jobExecutionId,
                                           String jobName,
@@ -15,24 +16,8 @@ public record JobExecutionStatusResponse(Long jobExecutionId,
                                           long writeCount,
                                           long skipCount) {
 
-    // Worker step executions of a partitioned step are named "<workerStep>:<partitionKey>".
-    private static final String PARTITION_NAME_MARKER = ":partition";
-
     public static JobExecutionStatusResponse from(JobExecution execution) {
-        long readCount = 0;
-        long writeCount = 0;
-        long skipCount = 0;
-        for (StepExecution stepExecution : execution.getStepExecutions()) {
-            // The manager step's StepExecution already carries the sum of its workers'
-            // counts (Spring Batch aggregates them on completion), so adding the worker
-            // executions too would count every partitioned item twice.
-            if (stepExecution.getStepName().contains(PARTITION_NAME_MARKER)) {
-                continue;
-            }
-            readCount += stepExecution.getReadCount();
-            writeCount += stepExecution.getWriteCount();
-            skipCount += stepExecution.getSkipCount();
-        }
+        JobCounts counts = JobCounts.of(execution);
 
         return new JobExecutionStatusResponse(
                 execution.getId(),
@@ -41,8 +26,8 @@ public record JobExecutionStatusResponse(Long jobExecutionId,
                 execution.getExitStatus().getExitCode(),
                 execution.getStartTime(),
                 execution.getEndTime(),
-                readCount,
-                writeCount,
-                skipCount);
+                counts.readCount(),
+                counts.writeCount(),
+                counts.skipCount());
     }
 }
