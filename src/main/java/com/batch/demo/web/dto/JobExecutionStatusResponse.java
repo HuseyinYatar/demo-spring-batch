@@ -3,7 +3,8 @@ package com.batch.demo.web.dto;
 import java.time.LocalDateTime;
 
 import org.springframework.batch.core.job.JobExecution;
-import org.springframework.batch.core.step.StepExecution;
+
+import com.batch.demo.batch.support.JobCounts;
 
 public record JobExecutionStatusResponse(Long jobExecutionId,
                                           String jobName,
@@ -16,14 +17,7 @@ public record JobExecutionStatusResponse(Long jobExecutionId,
                                           long skipCount) {
 
     public static JobExecutionStatusResponse from(JobExecution execution) {
-        long readCount = 0;
-        long writeCount = 0;
-        long skipCount = 0;
-        for (StepExecution stepExecution : execution.getStepExecutions()) {
-            readCount += stepExecution.getReadCount();
-            writeCount += stepExecution.getWriteCount();
-            skipCount += stepExecution.getSkipCount();
-        }
+        JobCounts counts = JobCounts.of(execution);
 
         return new JobExecutionStatusResponse(
                 execution.getId(),
@@ -32,8 +26,8 @@ public record JobExecutionStatusResponse(Long jobExecutionId,
                 execution.getExitStatus().getExitCode(),
                 execution.getStartTime(),
                 execution.getEndTime(),
-                readCount,
-                writeCount,
-                skipCount);
+                counts.readCount(),
+                counts.writeCount(),
+                counts.skipCount());
     }
 }

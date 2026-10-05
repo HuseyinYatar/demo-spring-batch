@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.time.LocalDate;
 
 import org.springframework.batch.core.configuration.JobRegistry;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
@@ -20,16 +20,13 @@ import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
-import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.support.ContextPropagatingTaskDecorator;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import com.batch.demo.batch.reject.RejectedRecordSink;
 import com.batch.demo.batch.step2.FlakyOrderPersistenceSimulator;
 import com.batch.demo.batch.step2.InvoiceSummaryPartitionPaths;
-
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
+import com.batch.demo.batch.support.BusinessDatePaths;
 
 /**
  * {@code @EnableBatchProcessing} + {@link EnableJdbcJobRepository} together back the
@@ -60,31 +57,23 @@ public class BatchJobConfig {
         // decorator automatically here because batchTaskExecutor is a
         // manually-declared bean, not the auto-configured TaskExecutor.
         executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
-        executor.initialize();
+        // Let in-flight partitions finish their current chunk on shutdown instead of
+        // being interrupted mid-transaction.
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        // Deliberately no executor.initialize() here: Spring calls it itself through
+        // afterPropertiesSet(), and initialize() builds a brand-new ThreadPoolExecutor
+        // every time it runs, so a manual call would orphan the first pool (never shut
+        // down) - see BatchTaskExecutorLifecycleTest.
         return executor;
     }
 
-    /**
-     * Boot doesn't auto-instrument ThreadPoolTaskExecutor beans (no
-     * TaskExecutorMetricsAutoConfiguration in this version, confirmed via jar
-     * inspection), so batchTaskExecutor's underlying ThreadPoolExecutor is bound to
-     * Micrometer manually here - exposes executor_active_threads/
-     * executor_pool_size_threads/executor_queued_tasks etc. tagged
-     * name="batchTaskExecutor" on /actuator/prometheus. Returning the raw
-     * ThreadPoolExecutor as its own bean (rather than just calling
-     * ExecutorServiceMetrics.monitor(...) inline inside batchTaskExecutor) matters:
-     * Micrometer's Gauge holds its target via a WeakReference, and confirmed live
-     * that without an independent strong reference in Spring's own singleton
-     * registry, the gauges intermittently report NaN once the executor becomes only
-     * weakly reachable - this bean's return value is that strong reference.
-     */
-    @Bean
-    public ThreadPoolExecutor batchThreadPoolExecutorMetrics(ThreadPoolTaskExecutor batchTaskExecutor,
-                                                               MeterRegistry meterRegistry) {
-        ThreadPoolExecutor threadPoolExecutor = batchTaskExecutor.getThreadPoolExecutor();
-        ExecutorServiceMetrics.monitor(meterRegistry, threadPoolExecutor, "batchTaskExecutor");
-        return threadPoolExecutor;
-    }
+    // No metrics wiring here on purpose: Boot's TaskExecutorMetricsAutoConfiguration
+    // already binds every ThreadPoolTaskExecutor bean, tagged name=<bean name>, giving
+    // executor_active_threads / executor_pool_size_threads / executor_queued_tasks etc.
+    // for name="batchTaskExecutor". Binding it a second time by hand only produces
+    // "FunctionCounter has been already registered" warnings - see
+    // BatchTaskExecutorLifecycleTest.
 
     /**
      * DefaultBatchConfiguration only auto-populates a JobRegistry the first time
@@ -140,8 +129,10 @@ public class BatchJobConfig {
                 if (isRestart) {
                     return;
                 }
-                rejectedRecordSink.reset();
-                for (Path partitionFile : InvoiceSummaryPartitionPaths.listPartitionFiles(properties.getInvoiceSummaryOutputPath())) {
+                LocalDate businessDate = jobExecution.getJobParameters().getLocalDate("businessDate");
+                rejectedRecordSink.reset(businessDate);
+                String datedSummaryPath = BusinessDatePaths.withBusinessDate(properties.getInvoiceSummaryOutputPath(), businessDate);
+                for (Path partitionFile : InvoiceSummaryPartitionPaths.listPartitionFiles(datedSummaryPath)) {
                     try {
                         Files.deleteIfExists(partitionFile);
                     } catch (IOException e) {

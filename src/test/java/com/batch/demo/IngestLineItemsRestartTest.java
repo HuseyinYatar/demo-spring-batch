@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * LineRangePartitioner recomputing the same full-file line ranges on every launch
  * including restart. This test exists to verify that combination doesn't silently
  * drop or duplicate rows - CLAUDE.md documents the expectation (the
- * existsByOrderIdAndProductId dedup guard should cover this) but until this test, it
+ * staging unique constraint + ON CONFLICT DO NOTHING should cover this) but until this test, it
  * was never actually run.
  */
 @SpringBootTest
@@ -87,8 +87,9 @@ class IngestLineItemsRestartTest extends AbstractPostgresIntegrationTest {
                 .toJobParameters();
 
         // Phase 1: fail partway through ingestLineItemsStep - chunk 1 (M01, M02,
-        // chunk-size=2) commits, chunk 2's first insert (M03) is the injected fault.
-        trigger.arm(2);
+        // chunk-size=2) commits, chunk 2's insert batch (M03, M04) is the injected fault.
+        // The writer prepares one statement per chunk, so one success is allowed.
+        trigger.arm(1);
         JobExecution execution = jobLauncherTestUtils.launchJob(jobParameters);
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.FAILED);

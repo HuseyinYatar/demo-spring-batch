@@ -68,11 +68,12 @@ class IngestLineItemsDbConnectionRetryTest extends AbstractPostgresIntegrationTe
                 .addString("inputFile", "classpath:data/test-order-line-items.csv")
                 .toJobParameters();
 
-        // chunk-size=2: rows 1-2 commit, row 3's insert throws the injected
-        // SQLTransientConnectionException, classified by Hibernate/Spring as
-        // DataAccessResourceFailureException - now retryable, so the retried attempt
-        // (trigger already fired once) succeeds and the job completes normally.
-        trigger.arm(2);
+        // chunk-size=2: rows 1-2 commit, the second chunk's insert batch (one prepared
+        // statement per chunk) throws the injected SQLTransientConnectionException,
+        // classified by Hibernate/Spring as DataAccessResourceFailureException - now
+        // retryable, so the retried attempt (trigger already fired once) succeeds and the
+        // job completes normally.
+        trigger.arm(1);
         JobExecution execution = jobLauncherTestUtils.launchJob(jobParameters);
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);

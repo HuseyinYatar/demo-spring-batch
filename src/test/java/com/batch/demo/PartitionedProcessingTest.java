@@ -22,6 +22,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
 import com.batch.demo.batch.step2.InvoiceSummaryPartitionPaths;
+import com.batch.demo.batch.support.BusinessDatePaths;
 import com.batch.demo.config.BatchProperties;
 import com.batch.demo.repository.OrderLineItemStagingRepository;
 import com.batch.demo.repository.OrderRepository;
@@ -71,8 +72,9 @@ class PartitionedProcessingTest extends AbstractPostgresIntegrationTest {
 
     @Test
     void allPartitionsCompleteAndMergeCorrectly() throws Exception {
+        LocalDate businessDate = LocalDate.of(2099, 1, 1);
         JobParameters jobParameters = new JobParametersBuilder()
-                .addLocalDate("businessDate", LocalDate.now())
+                .addLocalDate("businessDate", businessDate)
                 .addString("inputFile", "classpath:data/test-order-line-items-partitioned.csv")
                 .toJobParameters();
 
@@ -105,10 +107,11 @@ class PartitionedProcessingTest extends AbstractPostgresIntegrationTest {
 
         // mergeInvoiceSummaryStep must have recombined all 3 partition files into one
         // and deleted the partition files - not left them lying around.
-        assertThat(InvoiceSummaryPartitionPaths.listPartitionFiles(batchProperties.getInvoiceSummaryOutputPath()))
-                .isEmpty();
+        String datedPath = BusinessDatePaths.withBusinessDate(batchProperties.getInvoiceSummaryOutputPath(), businessDate);
+        assertThat(InvoiceSummaryPartitionPaths.listPartitionFiles(datedPath)).isEmpty();
 
-        Path merged = Path.of(batchProperties.getInvoiceSummaryOutputPath());
+        Path merged = Path.of(datedPath);
+        assertThat(merged.getFileName().toString()).endsWith("-" + businessDate + ".csv");
         assertThat(Files.exists(merged)).isTrue();
         List<String> mergedLines = readLines(merged);
         assertThat(mergedLines.get(0))
