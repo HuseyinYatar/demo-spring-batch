@@ -116,6 +116,13 @@ class DailyPipelineJobRestartTest extends AbstractPostgresIntegrationTest {
         assertThat(orderRepository.count()).isEqualTo(6);
         assertThat(dailySalesReportRepository.findByBusinessDate(today)).isEmpty();
 
+        // The failed execution still reports the work done before the failure: 7 rows
+        // ingested + 6 orders invoiced + 6 invoices read into the report's detail step,
+        // which committed before the summary step hit the injected fault.
+        JobExecutionStatusResponse failedStatus = JobExecutionStatusResponse.from(execution);
+        assertThat(failedStatus.readCount()).isEqualTo(19);
+        assertThat(failedStatus.writeCount()).isEqualTo(19);
+
         List<JobInstance> orderProcessingInstancesBefore = jobExplorer.getJobInstances("orderProcessingJob", 0, 10);
         assertThat(orderProcessingInstancesBefore).hasSize(1);
         assertThat(jobExplorer.getJobExecutions(orderProcessingInstancesBefore.get(0))).hasSize(1);
