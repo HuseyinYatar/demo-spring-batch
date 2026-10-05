@@ -1,0 +1,8 @@
+orderId,customerId,customerName,productId,productName,quantity,unitPrice,orderDate
+ORD-X01,CUST-X01,Restart Reject Customer 1,P601,Product A,1,10.00,2025-06-01
+ORD-X02,CUST-X02,Restart Reject Customer 2,P602,Product B,notanumber,10.00,2025-06-01
+ORD-X03,CUST-X03,,P603,Product C,1,10.00,2025-06-01
+ORD-X04,CUST-X04,Restart Reject Customer 4,P604,Product D,1,10.00,2025-06-01
+ORD-X05,CUST-X05,Restart Reject Customer 5,P605,Product E,1,10.00,2025-06-01
+ORD-X06,CUST-X06,Restart Reject Customer 6,P606,Product F,1,-5.00,2025-06-01
+ORD-X07,CUST-X07,Restart Reject Customer 7,P607,Product G,1,10.00,2025-06-01
