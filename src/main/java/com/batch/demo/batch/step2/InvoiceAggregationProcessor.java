@@ -11,20 +11,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.batch.demo.batch.dto.OrderInvoiceResult;
+import com.batch.demo.batch.dto.StagedOrder;
 import com.batch.demo.domain.Order;
 import com.batch.demo.domain.OrderLineItem;
 import com.batch.demo.domain.OrderLineItemStaging;
 import com.batch.demo.domain.OrderStatus;
-import com.batch.demo.repository.OrderLineItemStagingRepository;
-import com.batch.demo.repository.OrderRepository;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * For a given orderId, aggregates its staged line items into an Order + Invoice.
- * Returns null (Spring Batch filters nulls) when the order was already invoiced in a
- * prior run, or when no unprocessed staging rows remain for it - this keeps the job
- * safe to re-trigger without needing skip/exception machinery.
+ * Aggregates one staged order's line items into an Order + Invoice. Pure computation, no
+ * database access: StagedOrderItemReader has already loaded the lines for the whole page
+ * and dropped orders that were invoiced in a prior run, which is what keeps the job safe
+ * to re-trigger without needing skip/exception machinery.
  *
  * @StepScope (not a plain singleton) so businessDate can be late-bound from the run's
  * JobParameters - stamped onto each Invoice as issuedDate so it lines up with
@@ -37,26 +36,16 @@ import lombok.RequiredArgsConstructor;
 @Component
 @StepScope
 @RequiredArgsConstructor
-public class InvoiceAggregationProcessor implements ItemProcessor<String, OrderInvoiceResult> {
+public class InvoiceAggregationProcessor implements ItemProcessor<StagedOrder, OrderInvoiceResult> {
 
-    private final OrderLineItemStagingRepository stagingRepository;
-    private final OrderRepository orderRepository;
     private final InvoiceCalculator invoiceCalculator;
     @Value("#{jobParameters['businessDate']}")
     private final LocalDate businessDate;
 
     @Override
-    public OrderInvoiceResult process(String orderId) {
-        if (orderRepository.existsByOrderNumber(orderId)) {
-            return null;
-        }
-
-        List<OrderLineItemStaging> stagedLines = stagingRepository.findByOrderIdAndProcessedFalse(orderId);
-        if (stagedLines.isEmpty()) {
-            return null;
-        }
-
-        Order order = buildOrder(orderId, stagedLines);
+    public OrderInvoiceResult process(StagedOrder stagedOrder) {
+        List<OrderLineItemStaging> stagedLines = stagedOrder.lines();
+        Order order = buildOrder(stagedOrder.orderId(), stagedLines);
         order.setInvoice(invoiceCalculator.calculate(order, businessDate));
         order.getInvoice().setOrder(order);
         order.setStatus(OrderStatus.INVOICED);

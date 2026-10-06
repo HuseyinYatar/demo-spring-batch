@@ -23,30 +23,34 @@ import org.springframework.retry.backoff.BackOffPolicy;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.batch.demo.batch.dto.OrderInvoiceResult;
+import com.batch.demo.batch.dto.StagedOrder;
 import com.batch.demo.batch.observability.ChunkTracingListener;
 import com.batch.demo.batch.support.BusinessDatePaths;
-import com.batch.demo.batch.step2.DistinctOrderIdItemReader;
 import com.batch.demo.batch.step2.InvoiceSummaryMergeTasklet;
 import com.batch.demo.batch.step2.InvoiceSummaryFieldExtractor;
 import com.batch.demo.batch.step2.InvoiceSummaryPartitionPaths;
 import com.batch.demo.batch.step2.InvoiceWriteRetryListener;
 import com.batch.demo.batch.step2.OrderIdRangePartitioner;
 import com.batch.demo.batch.step2.OrderPersistenceItemWriter;
+import com.batch.demo.batch.step2.StagedOrderItemReader;
 import com.batch.demo.batch.step2.StagingMarkProcessedItemWriter;
 import com.batch.demo.batch.step2.TransientInvoiceWriteException;
 import com.batch.demo.repository.OrderLineItemStagingRepository;
+import com.batch.demo.repository.OrderRepository;
 
 @Configuration
 public class BuildInvoicesStepConfig {
 
     @Bean
     @StepScope
-    public DistinctOrderIdItemReader distinctOrderIdItemReader(
+    public StagedOrderItemReader stagedOrderItemReader(
             OrderLineItemStagingRepository stagingRepository,
+            OrderRepository orderRepository,
             BatchProperties properties,
             @Value("#{stepExecutionContext['fromOrderId']}") String fromOrderId,
             @Value("#{stepExecutionContext['toOrderId']}") String toOrderId) {
-        return new DistinctOrderIdItemReader(stagingRepository, fromOrderId, toOrderId, properties.getOrderIdPageSize());
+        return new StagedOrderItemReader(stagingRepository, orderRepository, fromOrderId, toOrderId,
+                properties.getOrderIdPageSize());
     }
 
     /**
@@ -95,15 +99,15 @@ public class BuildInvoicesStepConfig {
     public Step buildInvoicesWorkerStep(JobRepository jobRepository,
                                          PlatformTransactionManager transactionManager,
                                          BatchProperties properties,
-                                         DistinctOrderIdItemReader distinctOrderIdItemReader,
-                                         ItemProcessor<String, OrderInvoiceResult> invoiceAggregationProcessor,
+                                         StagedOrderItemReader stagedOrderItemReader,
+                                         ItemProcessor<StagedOrder, OrderInvoiceResult> invoiceAggregationProcessor,
                                          ItemWriter<OrderInvoiceResult> invoiceCompositeItemWriter,
                                          InvoiceWriteRetryListener invoiceWriteRetryListener,
                                          BackOffPolicy retryBackOffPolicy,
                                          ChunkTracingListener chunkTracingListener) {
         return new StepBuilder("buildInvoicesWorkerStep", jobRepository)
-                .<String, OrderInvoiceResult>chunk(properties.getChunkSize(), transactionManager)
-                .reader(distinctOrderIdItemReader)
+                .<StagedOrder, OrderInvoiceResult>chunk(properties.getChunkSize(), transactionManager)
+                .reader(stagedOrderItemReader)
                 .processor(invoiceAggregationProcessor)
                 .writer(invoiceCompositeItemWriter)
                 .faultTolerant()

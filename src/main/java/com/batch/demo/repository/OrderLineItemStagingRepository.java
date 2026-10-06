@@ -1,11 +1,14 @@
 package com.batch.demo.repository;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.batch.demo.domain.OrderLineItemStaging;
 
@@ -43,4 +46,24 @@ public interface OrderLineItemStagingRepository extends JpaRepository<OrderLineI
             Pageable pageable);
 
     List<OrderLineItemStaging> findByOrderIdAndProcessedFalse(String orderId);
+
+    /**
+     * Every unprocessed line of the given orders in one query, in staging order (id) so an
+     * order's first line is its earliest-staged one, as with the per-order lookup.
+     */
+    @Query("select s from OrderLineItemStaging s where s.orderId in :orderIds and s.processed = false "
+            + "order by s.id")
+    List<OrderLineItemStaging> findUnprocessedByOrderIdIn(@Param("orderIds") Collection<String> orderIds);
+
+    /**
+     * Flips the given staging rows to processed with one statement, instead of loading
+     * them as managed entities and letting dirty checking issue an UPDATE per row. Runs
+     * when called (inside the writer), not at commit, so it stays inside the step's retry
+     * scope and the repository's exception translation. Joins the chunk's transaction; the
+     * annotation is there because declared query methods get no transaction of their own.
+     */
+    @Transactional
+    @Modifying
+    @Query("update OrderLineItemStaging s set s.processed = true where s.id in :ids")
+    int markProcessed(@Param("ids") Collection<Long> ids);
 }
