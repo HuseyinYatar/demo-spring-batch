@@ -12,6 +12,11 @@ import com.batch.demo.repository.OrderLineItemStagingRepository;
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * Marks a chunk's source staging rows processed with a single UPDATE by id. The rows were
+ * loaded by StagedOrderItemReader in an earlier (possibly different) transaction, so they
+ * are detached here: saving them would merge each one (a SELECT apiece) before updating it.
+ */
 @Component
 @RequiredArgsConstructor
 public class StagingMarkProcessedItemWriter implements ItemWriter<OrderInvoiceResult> {
@@ -20,10 +25,12 @@ public class StagingMarkProcessedItemWriter implements ItemWriter<OrderInvoiceRe
 
     @Override
     public void write(Chunk<? extends OrderInvoiceResult> chunk) {
-        List<OrderLineItemStaging> stagingLines = chunk.getItems().stream()
+        List<Long> stagingIds = chunk.getItems().stream()
                 .flatMap(result -> result.sourceStagingLines().stream())
-                .peek(staging -> staging.setProcessed(true))
+                .map(OrderLineItemStaging::getId)
                 .toList();
-        stagingRepository.saveAll(stagingLines);
+        if (!stagingIds.isEmpty()) {
+            stagingRepository.markProcessed(stagingIds);
+        }
     }
 }
