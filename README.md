@@ -111,7 +111,8 @@ flowchart LR
     end
     S1 -. runs .-> J1["orderProcessingJob\n(same job as /order-processing)"]
     S2 -. runs .-> J2["dailySalesReportJob"]
-    J2 --> D1["dailyInvoiceDetailStep\n(chunk, JpaPagingItemReader)"]
+    J2 --> A0["analyzeInvoicesStep\n(tasklet: ANALYZE invoice)"]
+    A0 --> D1["dailyInvoiceDetailStep\n(chunk, JdbcPagingItemReader)"]
     D1 --> D2["dailySalesSummaryStep\n(tasklet: aggregate + upsert)"]
     D2 --> OUT1[("daily-sales-detail-*.csv")]
     D2 --> OUT2[("daily_sales_report row")]
@@ -170,6 +171,7 @@ All under the `batch.*` prefix (`application.properties`):
 | `batch.simulate-transient-write-failures` | `true`                                | Toggle the retry-policy demo                                       |
 | `batch.partition-grid-size`               | `6`                                   | Partitions (and worker threads) per step                           |
 | `batch.order-id-page-size`                | `500`                                 | Max order ids fetched per keyset page in step 2's reader           |
+| `batch.report-page-size`                  | `1000`                                | Rows per keyset page in the daily report's detail reader           |
 | `batch.daily-sales-report-output-dir`     | `daily-sales-reports`                 | Output directory for the daily pipeline's detail/top-customer CSVs |
 | `batch.report-top-customer-count`         | `3`                                   | Top-N customers by spend included in the daily sales report        |
 
@@ -234,6 +236,7 @@ The integration suite exercises the fault-tolerance and operational-control beha
 - **Real parallelism** — every other test pins `batch.partition-grid-size=1` for determinism; `PartitionedProcessingTest` raises it back up to verify multi-partition runs merge correctly with nothing dropped or duplicated across partition boundaries.
 - **Status endpoint counts** — `GET /executions/{id}` reports job-level read/write/skip counts that match the real work done, not double-counted (a partitioned manager step already carries its workers' totals, so `JobExecutionStatusResponse` skips the `:partition` worker executions) — checked under real `gridSize=3` partitioning (`PartitionedJobStatusEndpointTest`). For `dailyPipelineJob`, whose own steps are two `JobStep`s, each `JobStep` carries its nested job's totals (`NestedJobCountsRollupListener`), so the pipeline reports the work of both nested jobs rather than 0 (`DailyPipelineJobStatusEndpointTest`).
 - **Job composition** — the daily pipeline runs both nested jobs and produces a correct report (`DailyPipelineJobTest`), a same-day relaunch and cross-endpoint conflict both fail as expected (`DailyPipelineJobIdempotencyTest`), and a failure in the report job followed by restart resumes only that nested job — proven by inspecting nested `JobInstance`/`JobExecution` counts before and after, not just the top-level status (`DailyPipelineJobRestartTest`). The report job's edge cases — a date with no invoices (zeroed report, header-only CSVs), re-running for an already-reported date (the existing row is updated in place), and a re-run after the day's invoices are gone (no stale top customer left behind) — are in `DailySalesReportEdgeCasesTest`.
+- **Report detail reader** — the keyset-paged detail reader returns every invoice of the day exactly once across page boundaries, resumes without repeating or skipping an invoice at any position (inside a page, on a boundary, at the end), and the detail CSV matches the invoices in the database (`DailyInvoiceDetailReaderTest`). The report job's first step analyzes the freshly loaded `invoice` table so the reader gets a good query plan; a test checks it runs first and that planner statistics exist afterwards (`AnalyzeInvoicesStepTest`).
 - **Tracing** — every partition of both worker steps produces per-chunk spans, and they all share one trace instead of starting disconnected ones — proof the trace context actually survives the hop onto `batchTaskExecutor`'s worker threads (`ChunkTracingSpansTest`); actuator requests produce no spans while real application requests still do (`ActuatorObservationExclusionTest`).
 
 ## Known limitations (demo scope)
