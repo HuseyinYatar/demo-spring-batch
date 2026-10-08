@@ -6,7 +6,21 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "10s",
-  "time": { "from": "now-24h", "to": "now" },
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "type": "textbox",
+        "name": "tz",
+        "label": "App timezone",
+        "description": "The BATCH_* tables store local time WITHOUT a zone; this is the zone the app JVM runs in, so the timeline lines up with the time picker.",
+        "query": "Europe/Istanbul",
+        "current": { "text": "Europe/Istanbul", "value": "Europe/Istanbul" },
+        "options": [{ "selected": true, "text": "Europe/Istanbul", "value": "Europe/Istanbul" }],
+        "hide": 0
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
@@ -102,10 +116,242 @@
       }
     },
     {
+      "id": 6,
+      "type": "state-timeline",
+      "title": "Step Timeline",
+      "description": "One row per step, one bar per execution, placed at its real start/end time. Partitions of a worker step run in parallel, so their bars overlap. Widen/narrow the time picker to zoom.",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "batchdemo-postgres"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "batchdemo-postgres"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT time, metric, value FROM ( SELECT s.start_time AT TIME ZONE ${tz:sqlstring} AS time, s.step_name AS metric, CASE s.status WHEN 'COMPLETED' THEN 1 WHEN 'FAILED' THEN 2 ELSE 3 END AS value FROM batch_step_execution s WHERE s.start_time IS NOT NULL UNION ALL SELECT s.end_time AT TIME ZONE ${tz:sqlstring}, s.step_name, 0 FROM batch_step_execution s WHERE s.end_time IS NOT NULL) t WHERE $__timeFilter(time) ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "idle",
+                  "color": "transparent",
+                  "index": 0
+                },
+                "1": {
+                  "text": "COMPLETED",
+                  "color": "green",
+                  "index": 1
+                },
+                "2": {
+                  "text": "FAILED",
+                  "color": "red",
+                  "index": 2
+                },
+                "3": {
+                  "text": "RUNNING / OTHER",
+                  "color": "orange",
+                  "index": 3
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "center",
+        "rowHeight": 0.85,
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Job Duration (last 20 executions)",
+      "description": "Duration in seconds of the 20 most recent finished job executions, coloured by final status. Independent of the time picker.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "batchdemo-postgres"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "batchdemo-postgres"
+          },
+          "format": "table",
+          "rawSql": "WITH last AS (SELECT e.job_execution_id AS id, i.job_name, e.status, round(extract(epoch FROM (e.end_time - e.start_time))::numeric, 2) AS dur FROM batch_job_execution e JOIN batch_job_instance i ON i.job_instance_id = e.job_instance_id WHERE e.end_time IS NOT NULL ORDER BY e.job_execution_id DESC LIMIT 20) SELECT '#' || id || ' ' || job_name AS \"Execution\", CASE WHEN status = 'COMPLETED' THEN dur END AS \"COMPLETED\", CASE WHEN status = 'FAILED' THEN dur END AS \"FAILED\", CASE WHEN status NOT IN ('COMPLETED', 'FAILED') THEN dur END AS \"OTHER\" FROM last ORDER BY id",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "COMPLETED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "FAILED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OTHER"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "Execution",
+        "orientation": "vertical",
+        "stacking": "normal",
+        "showValue": "auto",
+        "xTickLabelRotation": -45,
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Step Duration per Job Execution (last 10)",
+      "description": "For each of the 10 most recent finished job executions, how long each step took (seconds). One group of bars per execution, one bar per step. Partition sub-steps (:partitionN) are left out - the manager step's own duration already covers them. In dailyPipelineJob the JobStep bars (orderProcessingJobStep, ...) include the nested job's inner steps, so don't add the bars up. Independent of the time picker.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 26 },
+      "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT '#' || l.id || ' ' || l.job_name AS \"Execution\", s.step_name AS \"Step\", round(extract(epoch FROM (s.end_time - s.start_time))::numeric, 2) AS \"Duration\" FROM (SELECT e.job_execution_id AS id, i.job_name FROM batch_job_execution e JOIN batch_job_instance i ON i.job_instance_id = e.job_instance_id WHERE e.end_time IS NOT NULL ORDER BY e.job_execution_id DESC LIMIT 10) l JOIN batch_step_execution s ON s.job_execution_id = l.id WHERE s.end_time IS NOT NULL AND s.step_name NOT LIKE '%:partition%' ORDER BY l.id, s.step_execution_id",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": { "columnField": "Step", "rowField": "Execution", "valueField": "Duration", "emptyValue": "null" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": { "fillOpacity": 80, "lineWidth": 0 }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "vertical",
+        "stacking": "none",
+        "showValue": "auto",
+        "xTickLabelRotation": -45,
+        "barWidth": 0.9,
+        "groupWidth": 0.8,
+        "legend": { "showLegend": true, "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      }
+    },
+    {
       "id": 4,
       "type": "table",
       "title": "Job Executions",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 4 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 35 },
       "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
       "targets": [
         {
@@ -128,13 +374,13 @@
       "id": 5,
       "type": "table",
       "title": "Step Executions",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 14 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 45 },
       "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
       "targets": [
         {
           "datasource": { "type": "postgres", "uid": "batchdemo-postgres" },
           "format": "table",
-          "rawSql": "SELECT s.step_execution_id AS \"Step Exec ID\", s.job_execution_id AS \"Job Exec ID\", s.step_name AS \"Step\", s.status AS \"Status\", s.read_count AS \"Read\", s.write_count AS \"Write\", s.commit_count AS \"Commits\", (s.read_skip_count + s.write_skip_count + s.process_skip_count) AS \"Skips\", s.rollback_count AS \"Rollbacks\", s.start_time AS \"Start Time\", s.end_time AS \"End Time\" FROM batch_step_execution s ORDER BY s.step_execution_id DESC;",
+          "rawSql": "SELECT s.step_execution_id AS \"Step Exec ID\", s.job_execution_id AS \"Job Exec ID\", s.step_name AS \"Step\", s.status AS \"Status\", s.read_count AS \"Read\", s.write_count AS \"Write\", s.commit_count AS \"Commits\", (s.read_skip_count + s.write_skip_count + s.process_skip_count) AS \"Skips\", s.rollback_count AS \"Rollbacks\", s.start_time AS \"Start Time\", s.end_time AS \"End Time\", round(extract(epoch FROM (s.end_time - s.start_time))::numeric, 3) AS \"Duration (s)\" FROM batch_step_execution s ORDER BY s.step_execution_id DESC;",
           "refId": "A"
         }
       ],

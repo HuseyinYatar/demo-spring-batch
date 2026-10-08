@@ -6,28 +6,50 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "15s",
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
       "type": "stat",
-      "title": "Job Runs Recorded",
-      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+      "title": "Job Runs Since App Start",
+      "description": "Total job executions recorded by Micrometer since the app last started (resets on restart). Per-run history lives in the Batch Job & Step Executions dashboard.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "batchdemo-prometheus"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
           "expr": "sum(spring_batch_job_seconds_count)",
-          "instant": true,
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "blue", "value": null }]
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
           },
           "mappings": []
         },
@@ -35,7 +57,9 @@
       },
       "options": {
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -49,24 +73,50 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Max Job Duration (s)",
-      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+      "title": "Active Partition Threads",
+      "description": "Threads of batchTaskExecutor currently running a partition. Pool size = batch.partition-grid-size.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "batchdemo-prometheus"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
-          "expr": "max(max_over_time(spring_batch_job_seconds_max[$__range]))",
-          "instant": true,
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "executor_active_threads{name=\"batchTaskExecutor\"}",
+          "refId": "A",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "orange", "value": null }]
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 6
+              }
+            ]
           },
           "mappings": []
         },
@@ -74,7 +124,9 @@
       },
       "options": {
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -87,37 +139,424 @@
     },
     {
       "id": 3,
-      "type": "timeseries",
-      "title": "Cumulative Job Time (s)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+      "type": "stat",
+      "title": "DB Connections In Use",
+      "description": "Active HikariCP connections. Default max is 10; each partition holds one for the duration of its chunk.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "batchdemo-prometheus"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
-          "expr": "spring_batch_job_seconds_sum",
-          "legendFormat": "{{spring_batch_job_name}} ({{spring_batch_job_status}})",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "hikaricp_connections_active",
+          "refId": "A",
+          "instant": true
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
-      "options": {}
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 8
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
     },
     {
       "id": 4,
-      "type": "timeseries",
-      "title": "Cumulative Step Time (s) by Step",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
+      "type": "stat",
+      "title": "Heap Used",
+      "description": "JVM heap currently in use (all heap pools).",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "batchdemo-prometheus"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "batchdemo-prometheus" },
-          "expr": "spring_batch_step_seconds_sum",
-          "legendFormat": "{{spring_batch_step_name}}",
-          "refId": "A"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})",
+          "refId": "A",
+          "instant": true
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
-      "options": {}
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Partition Thread Pool",
+      "description": "batchTaskExecutor: threads running a partition vs. partitions waiting for a free thread. The dashed line is the pool size.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "batchdemo-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "executor_active_threads{name=\"batchTaskExecutor\"}",
+          "refId": "A",
+          "legendFormat": "active"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "executor_queued_tasks{name=\"batchTaskExecutor\"}",
+          "refId": "B",
+          "legendFormat": "queued"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "executor_pool_max_threads{name=\"batchTaskExecutor\"}",
+          "refId": "C",
+          "legendFormat": "max"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "fillOpacity": 10
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "max"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "DB Connection Pool (HikariCP)",
+      "description": "Connections in use vs. callers waiting for one. If 'pending' rises while 'active' sits at the dashed max line, partitions are serializing on the pool - raise spring.datasource.hikari.maximum-pool-size.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "batchdemo-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "hikaricp_connections_active",
+          "refId": "A",
+          "legendFormat": "active"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "hikaricp_connections_pending",
+          "refId": "B",
+          "legendFormat": "pending"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "hikaricp_connections_max",
+          "refId": "C",
+          "legendFormat": "max"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "fillOpacity": 10
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "max"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "JVM Heap Used",
+      "description": "Heap in use across all heap pools. Should stay flat as order volume grows now that the partitioner no longer loads every order id into memory.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "batchdemo-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})",
+          "refId": "A",
+          "legendFormat": "used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "fillOpacity": 10
+          },
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "GC Pause Time",
+      "description": "Share of each second spent in GC pauses, by GC action (1m rate).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "batchdemo-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "batchdemo-prometheus"
+          },
+          "expr": "sum by (action) (rate(jvm_gc_pause_seconds_sum[1m]))",
+          "refId": "A",
+          "legendFormat": "{{action}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "fillOpacity": 10
+          },
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
     }
   ]
 }
