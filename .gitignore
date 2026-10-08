@@ -36,4 +36,8 @@ build/
 ### Csv ###
 invoice-summary*.csv
 rejected-rows*.csv
-daily-sales-reports/
+daily-sales-reports*/
+
+
+### Reports ###
+report/*
