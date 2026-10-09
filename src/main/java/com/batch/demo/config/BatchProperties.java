@@ -28,4 +28,6 @@ public class BatchProperties {
     private int reportPageSize = 1000;
     private String dailySalesReportOutputDir = "daily-sales-reports";
     private int reportTopCustomerCount = 3;
+    /** Destructive, so off unless a profile asks for it; application.properties turns it on for the demo. */
+    private boolean truncateBusinessTablesOnStartup = false;
 }

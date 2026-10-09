@@ -95,6 +95,7 @@ curl http://localhost:8080/actuator/prometheus           # spring_batch_job_seco
 - Anything that runs once per `StepExecution` (`open()`/`close()`) must be `@StepScope` with a per-partition path if it can run under partitioning.
 - `Order`/`OrderLineItem`/`Invoice` ids must stay `SEQUENCE`, not `IDENTITY`: Hibernate silently disables insert batching for IDENTITY ids (see "Order inserts are JDBC-batched"), and `OrderPersistenceItemWriter` must flush inside `write()`.
 - Never call `.skip(...)` for transient DB failures — a skip in the worker steps' invoice path leaves no audit trail. Retry, then fail loudly.
+- A new JPA entity's table must be added to `TruncateBusinessTablesRunner.BUSINESS_TABLES` (see "Business tables are truncated on startup"); `TruncateBusinessTablesRunnerTest` fails until it is.
 
 ## Architecture
 
@@ -261,6 +262,16 @@ Confirmed via `javap` (all package relocations, not assumed): `org.springframewo
 - **`dailySalesReportJob`'s report step is deliberately *not* partitioned**, unlike `ingestLineItemsStep`/`buildInvoicesStep` — a single day's invoice volume is a small slice of the full historical dataset, so a plain single-threaded chunk step is the honest choice here, not a missed opportunity.
 - **`InvoiceCalculator` now stamps `Invoice.issuedDate` from the run's `businessDate` JobParameter, not wall-clock `LocalDate.now()`** — previously these were unrelated (`businessDate` was only ever an identifying parameter for idempotency, never plumbed into persisted data), which meant `dailySalesReportJob`'s `issuedDate = :businessDate` filter only lined up with real data for a same-day run, and a `?businessDate=` override used to dodge a same-day 409 made the report come back with `invoiceCount = 0` rather than erroring. Fixed by making `InvoiceAggregationProcessor` `@StepScope` (in addition to `@Component`) with a `@Value("#{jobParameters['businessDate']}") LocalDate businessDate` field — same pattern `DailySalesReportStepConfig` already used — and passing that date into `InvoiceCalculator.calculate(order, issuedDate)`. See `lombok.config` for why `@RequiredArgsConstructor` on that field works here rather than needing a hand-written constructor.
 
+### Business tables are truncated on startup
+
+`TruncateBusinessTablesRunner` (`maintenance/`, a `CommandLineRunner` at `@Order(0)`) runs one `TRUNCATE TABLE invoice, order_line_item, orders, order_line_item_staging, daily_sales_report RESTART IDENTITY` when `batch.truncate-business-tables-on-startup` is true. The property is `true` in `application.properties` and `false` in `application-test.properties` (and in the `BatchProperties` default, since it is destructive). Things that are not obvious:
+
+- **`BATCH_*` tables are deliberately not truncated** (execution history and the Grafana dashboards live there). So a `JobInstance` that completed for today's `businessDate` survives the restart, and re-triggering without `?businessDate=` still returns 409 against empty tables. Wanting a full reset means also truncating those tables (`BusinessDataCleaner` in the test sources does both) or `docker compose down -v`.
+- **The table list is an explicit allowlist, with no `CASCADE`.** One statement naming every FK-linked table is accepted by Postgres; a table that references one of them but is not listed makes the statement fail loudly instead of being emptied silently. `TruncateBusinessTablesRunnerTest#theTableListCoversEveryTableThatIsNotASpringBatchTable` compares the list with `information_schema`, so a new entity whose table is missing fails the build.
+- **It runs after `ddl-auto=update` and the `BATCH_*` DDL**, so a first start on an empty database truncates empty tables. `@Order(0)` puts it before any runner without an explicit order, which sort last.
+- **`RESTART IDENTITY` only resets the identity columns** (staging, `daily_sales_report`). The `SEQUENCE` ids (`orders_seq` etc.) keep counting, which is harmless.
+- **Testing the startup path:** `TruncateBusinessTablesOnStartupTest` imports a `@TestComponent` `CommandLineRunner` at `@Order(-1)` that seeds every business table (`BusinessDataSeeder`) and a `batch_job_instance` row before the truncating runner. The `batch_job_instance` row surviving is also what proves the seeding ran; without it "tables are empty" would pass vacuously. Output files (CSV, partition files) are not touched.
+
 ### Idempotency (re-triggering the job)
 
 Two layers guard against duplicate work on re-trigger:
@@ -279,7 +290,7 @@ Two layers guard against duplicate work on re-trigger:
 
 ### Config properties (`batch.*` prefix, `config/BatchProperties`)
 
-`inputCsvPath`, `rejectsFilePath`, `invoiceSummaryOutputPath`, `taxRate`, `chunkSize`, `skipLimit`, `retryLimit`, `retryBackoffInitialIntervalMs`, `retryBackoffMultiplier`, `retryBackoffMaxIntervalMs`, `simulateTransientWriteFailures`, `partitionGridSize`, `orderIdPageSize`, `reportPageSize`, `dailySalesReportOutputDir`, `reportTopCustomerCount` — bound via `@ConfigurationProperties`, registered with `@EnableConfigurationProperties(BatchProperties.class)` on `DemoApplication`.
+`inputCsvPath`, `rejectsFilePath`, `invoiceSummaryOutputPath`, `taxRate`, `chunkSize`, `skipLimit`, `retryLimit`, `retryBackoffInitialIntervalMs`, `retryBackoffMultiplier`, `retryBackoffMaxIntervalMs`, `simulateTransientWriteFailures`, `partitionGridSize`, `orderIdPageSize`, `reportPageSize`, `dailySalesReportOutputDir`, `reportTopCustomerCount`, `truncateBusinessTablesOnStartup` — bound via `@ConfigurationProperties`, registered with `@EnableConfigurationProperties(BatchProperties.class)` on `DemoApplication`.
 
 ### Output files are suffixed with the run's `businessDate`
 
@@ -293,4 +304,5 @@ Two layers guard against duplicate work on re-trigger:
 - `spring.jpa.hibernate.ddl-auto=update` — no migration tool (Flyway/Liquibase) is wired up.
 - `spring.sql.init.mode=always` with `continue-on-error=true` for the Batch schema — real usage would use a proper migration instead of re-running non-idempotent DDL on every boot.
 - Grafana runs with `GF_AUTH_ANONYMOUS_ENABLED=true` (viewer role) and default `admin`/`admin` credentials — open dashboard access with no login prompt, fine for `localhost`-only use, would need real auth before being reachable by anyone else.
+- `batch.truncate-business-tables-on-startup=true` — every start of the app wipes the business tables of whatever database it points at; a real deployment would never do this.
 - `management.tracing.sampling.probability=1.0` — every job execution is traced in full; a real deployment would sample a small fraction instead to control tracing backend volume/cost.
