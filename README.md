@@ -41,7 +41,7 @@ curl -X POST http://localhost:8080/api/batch/jobs/order-processing
 curl http://localhost:8080/api/batch/jobs/executions/1
 ```
 
-The job does **not** run automatically on startup (`spring.batch.job.enabled=false`) — it's always triggered explicitly via the REST endpoint above. Sample input data lives at `src/main/resources/data/order-line-items.csv` (regenerate it with `python generate.py`, which writes ~100,000 rows including a handful of deliberately invalid ones to exercise the skip path).
+The job does **not** run automatically on startup (`spring.batch.job.enabled=false`) — it's always triggered explicitly via the REST endpoint above. What the app _does_ do on every start is empty the business tables (orders, line items, invoices, staging, daily reports) — see [Configuration](#configuration) to switch that off. Spring Batch's own `BATCH_*` tables are kept, so a business date that already completed is still rejected with `409`; pass a new `businessDate` to run again. Sample input data lives at `src/main/resources/data/order-line-items.csv` (regenerate it with `python generate.py`, which writes ~100,000 rows including a handful of deliberately invalid ones to exercise the skip path).
 
 ## REST API
 
@@ -174,6 +174,7 @@ All under the `batch.*` prefix (`application.properties`):
 | `batch.report-page-size`                  | `1000`                                | Rows per keyset page in the daily report's detail reader           |
 | `batch.daily-sales-report-output-dir`     | `daily-sales-reports`                 | Output directory for the daily pipeline's detail/top-customer CSVs |
 | `batch.report-top-customer-count`         | `3`                                   | Top-N customers by spend included in the daily sales report        |
+| `batch.truncate-business-tables-on-startup` | `true` (`false` if unset)           | Empty the business tables on every app start (`BATCH_*` tables are kept) |
 
 ## Observability
 
@@ -208,6 +209,7 @@ src/main/java/com/batch/demo/
     validation/  Pluggable business-rule validators (Open/Closed)
   config/        Job/step wiring, batch properties, retry backoff policy, daily pipeline composition (JobStep)
   domain/        JPA entities
+  maintenance/   Startup runner that empties the business tables
   repository/    Spring Data repositories
   web/           REST controller, exception handling, DTOs
 ```
@@ -237,6 +239,7 @@ The integration suite exercises the fault-tolerance and operational-control beha
 - **Status endpoint counts** — `GET /executions/{id}` reports job-level read/write/skip counts that match the real work done, not double-counted (a partitioned manager step already carries its workers' totals, so `JobExecutionStatusResponse` skips the `:partition` worker executions) — checked under real `gridSize=3` partitioning (`PartitionedJobStatusEndpointTest`). For `dailyPipelineJob`, whose own steps are two `JobStep`s, each `JobStep` carries its nested job's totals (`NestedJobCountsRollupListener`), so the pipeline reports the work of both nested jobs rather than 0 (`DailyPipelineJobStatusEndpointTest`).
 - **Job composition** — the daily pipeline runs both nested jobs and produces a correct report (`DailyPipelineJobTest`), a same-day relaunch and cross-endpoint conflict both fail as expected (`DailyPipelineJobIdempotencyTest`), and a failure in the report job followed by restart resumes only that nested job — proven by inspecting nested `JobInstance`/`JobExecution` counts before and after, not just the top-level status (`DailyPipelineJobRestartTest`). The report job's edge cases — a date with no invoices (zeroed report, header-only CSVs), re-running for an already-reported date (the existing row is updated in place), and a re-run after the day's invoices are gone (no stale top customer left behind) — are in `DailySalesReportEdgeCasesTest`.
 - **Report detail reader** — the keyset-paged detail reader returns every invoice of the day exactly once across page boundaries, resumes without repeating or skipping an invoice at any position (inside a page, on a boundary, at the end), and the detail CSV matches the invoices in the database (`DailyInvoiceDetailReaderTest`). The report job's first step analyzes the freshly loaded `invoice` table so the reader gets a good query plan; a test checks it runs first and that planner statistics exist afterwards (`AnalyzeInvoicesStepTest`).
+- **Startup truncation** — rows present while the app starts are gone once it is up, and `BATCH_*` rows survive (`TruncateBusinessTablesOnStartupTest`); the runner empties all five business tables and restarts the identity columns, does nothing with the flag off, and its table list covers every non-`BATCH_*` table in the schema (`TruncateBusinessTablesRunnerTest`). Every other test turns the runner off in `application-test.properties`.
 - **Tracing** — every partition of both worker steps produces per-chunk spans, and they all share one trace instead of starting disconnected ones — proof the trace context actually survives the hop onto `batchTaskExecutor`'s worker threads (`ChunkTracingSpansTest`); actuator requests produce no spans while real application requests still do (`ActuatorObservationExclusionTest`).
 
 ## Known limitations (demo scope)
@@ -246,6 +249,7 @@ The integration suite exercises the fault-tolerance and operational-control beha
 - The row-level dedup key (`orderId` + `productId`) assumes an order has at most one line item per product; it also detects and drops exact re-deliveries but doesn't reconcile _corrections_ — a resend with a different quantity/price is treated as a duplicate and silently dropped, the original wins.
 - Grafana runs with anonymous viewer access and default credentials — fine for local use, not for anything internet-facing.
 - Actuator endpoints are unauthenticated.
+- `batch.truncate-business-tables-on-startup=true` wipes the business tables on every start of the app, against whatever database it is pointed at — a local-demo convenience, not something to leave on anywhere the data matters.
 - Tracing samples every job execution (`management.tracing.sampling.probability=1.0`) — a real deployment would sample a small fraction instead.
 
 See `CLAUDE.md` for a deeper architectural walkthrough, including the specific Spring Batch 6.0 package-relocation gotchas and design rationale for each major decision.
